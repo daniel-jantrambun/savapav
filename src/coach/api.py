@@ -1,7 +1,7 @@
 import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, FastAPI, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -338,11 +338,14 @@ def create_app(settings: Settings) -> FastAPI:
         return {"hidden": body.hidden}
 
     @api.get("/stats")
-    def stats(user: User, conn: Conn, weeks: int = Query(default=26, ge=0), hidden: bool = False):
+    def stats(user: User, conn: Conn, weeks: int = Query(default=26, ge=0), hidden: bool = False,
+              by: Literal["auto", "week", "month"] = "auto"):
         # 0 : tout l'historique.
         if 0 < weeks < 4:
             raise HTTPException(422, "Au moins 4 semaines")
-        return service.stats(conn, user, date.today(), weeks, hidden)
+        # by : regroupement par semaine ou par mois ; auto = par mois au-delà de 5 ans.
+        monthly = None if by == "auto" else by == "month"
+        return service.stats(conn, user, date.today(), weeks, hidden, monthly)
 
     @api.get("/load")
     def load(user: User, conn: Conn, days: int = 120):

@@ -174,6 +174,34 @@ def test_stats_all_history_starts_at_first_activity(settings, conn):
     assert [a["id"] for a in alice.get("/api/activities/category?category=run&weeks=0").json()] == ["fit:old"]
 
 
+def test_stats_grouping_can_be_forced(settings, conn):
+    from datetime import date
+
+    from coach import service
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    for id_, day in (("a", "2025-10-15"), ("b", "2026-10-06"), ("c", "2026-10-08")):
+        upsert_activity(conn, {"user_id": alice_id, "id": f"fit:{id_}", "source": "fit", "sport": "running",
+                               "start_time": f"{day}T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000})
+    conn.commit()
+    today = date(2026, 10, 12)
+    weekly = service.stats(conn, {"id": alice_id}, today, 52)["categories"]["run"]
+    assert weekly["bucket"] == "week" and len(weekly["weeks"]) == 52
+    monthly = service.stats(conn, {"id": alice_id}, today, 52, monthly=True)["categories"]["run"]
+    assert monthly["bucket"] == "month"
+    assert monthly["weeks"][0]["start"] == "2025-10-01"  # 1er du mois de la 1re semaine
+    assert monthly["weeks"][-1] == {**monthly["weeks"][-1], "start": "2026-10-01", "sessions": 2}
+    # Le premier mois est complet : la séance du 15 octobre 2025, avant la 1re des 52 semaines, y est comptée.
+    assert (weekly["total"]["sessions"], monthly["total"]["sessions"]) == (2, 3)
+    # Au-delà de 5 ans, on peut au contraire rester par semaine.
+    assert service.stats(conn, {"id": alice_id}, today, 520, monthly=False)["categories"]["run"]["bucket"] == "week"
+
+    alice = client_for(settings, "alice")
+    assert alice.get("/api/stats?weeks=52&by=month").json()["categories"]["run"]["bucket"] == "month"
+    assert alice.get("/api/stats?weeks=52&by=year").status_code == 422
+
+
 def test_hidden_activities_are_filtered_unless_requested(settings, conn):
     from coach.db import upsert_activity
 

@@ -164,11 +164,16 @@ def analyze(activities, today: date, hr_rest: int, hr_max: int, weeks: int = ANA
 MONTHLY_ABOVE_WEEKS = 260
 
 
-def stats_start(today: date, weeks: int) -> date:
+def is_monthly(weeks: int, monthly: bool | None = None) -> bool:
+    """Regroupement par mois : imposé par `monthly`, sinon au-delà de `MONTHLY_ABOVE_WEEKS`."""
+    return weeks > MONTHLY_ABOVE_WEEKS if monthly is None else monthly
+
+
+def stats_start(today: date, weeks: int, monthly: bool | None = None) -> date:
     """Lundi de la première des `weeks` semaines calendaires couvertes par les statistiques ; 1er du mois de ce
-    lundi au-delà de `MONTHLY_ABOVE_WEEKS`, pour que le premier mois soit complet."""
+    lundi en regroupement mensuel (`is_monthly`), pour que le premier mois soit complet."""
     monday = today - timedelta(days=today.weekday(), weeks=weeks - 1)
-    return monday.replace(day=1) if weeks > MONTHLY_ABOVE_WEEKS else monday
+    return monday.replace(day=1) if is_monthly(weeks, monthly) else monday
 
 
 def _months_between(start: date, day: date) -> int:
@@ -185,9 +190,10 @@ def weeks_since(first: date, today: date) -> int:
     return max(1, ((today - first).days + first.weekday() - today.weekday()) // 7 + 1)
 
 
-def category_stats(activities, today: date, weeks: int, first_days: dict[str, date] | None = None) -> dict[str, dict]:
+def category_stats(activities, today: date, weeks: int, first_days: dict[str, date] | None = None,
+                   monthly: bool | None = None) -> dict[str, dict]:
     """Par type d'activité, semaines calendaires (lundi) des `weeks` dernières semaines, semaine en cours comprise —
-    ou mois calendaires au-delà de `MONTHLY_ABOVE_WEEKS` (`bucket`) : séances, minutes, km, allure/vitesse moyenne
+    ou mois calendaires (`bucket`, voir `is_monthly`) : séances, minutes, km, allure/vitesse moyenne
     (temps total / distance totale), FC moyenne pondérée par la durée.
 
     `first_days` : date de la toute première activité de chaque type. Ses graphes démarrent alors à cette date
@@ -209,17 +215,17 @@ def category_stats(activities, today: date, weeks: int, first_days: dict[str, da
     result = {}
     for cat, acts in by_cat.items():
         span = min(weeks, weeks_since(first_days[cat], today)) if cat in first_days else weeks
-        monthly = span > MONTHLY_ABOVE_WEEKS
-        start = stats_start(today, span)
+        by_month = is_monthly(span, monthly)
+        start = stats_start(today, span, by_month)
         weekly = [
             {"sessions": 0, "seconds": 0.0, "meters": 0.0, "timed_meters": 0.0, "hr_seconds": 0.0, "hr_sum": 0.0}
-            for _ in range(_months_between(start, today) + 1 if monthly else span)
+            for _ in range(_months_between(start, today) + 1 if by_month else span)
         ]
         for a in acts:
             day = _day(a)
             if not start <= day <= today:
                 continue
-            w = weekly[_months_between(start, day) if monthly else (day - start).days // 7]
+            w = weekly[_months_between(start, day) if by_month else (day - start).days // 7]
             w["sessions"] += 1
             w["seconds"] += a["duration_s"]
             if a["distance_m"]:
@@ -232,10 +238,10 @@ def category_stats(activities, today: date, weeks: int, first_days: dict[str, da
         if not total["sessions"]:
             continue
         result[cat] = {
-            "bucket": "month" if monthly else "week",
+            "bucket": "month" if by_month else "week",
             # Clé « weeks » conservée en mode mensuel : chaque entrée est alors un mois.
             "weeks": [
-                {"start": str(_add_months(start, i) if monthly else start + timedelta(weeks=i)), **summary(w)}
+                {"start": str(_add_months(start, i) if by_month else start + timedelta(weeks=i)), **summary(w)}
                 for i, w in enumerate(weekly)
             ],
             "total": summary(total),

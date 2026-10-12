@@ -312,7 +312,9 @@ export const api = {
   setActivityHidden: (id: string, hidden: boolean) =>
     request<{ hidden: boolean }>("PATCH", `/activities/${encodeURIComponent(id)}`, { hidden }),
   activity: (id: string) => request<ActivityDetail>("GET", `/activities/${encodeURIComponent(id)}`),
-  stats: (weeks: number, hidden = false) => request<Stats>("GET", `/stats?weeks=${weeks}&hidden=${hidden}`),
+  // by : regroupement imposé ; auto = par mois au-delà de 5 ans.
+  stats: (weeks: number, hidden = false, by: "auto" | "week" | "month" = "auto") =>
+    request<Stats>("GET", `/stats?weeks=${weeks}&hidden=${hidden}&by=${by}`),
   importFile: (file: File) => {
     const form = new FormData();
     form.append("file", file);

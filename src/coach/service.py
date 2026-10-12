@@ -144,14 +144,14 @@ def first_days(conn, user_id: int, hidden: bool = False) -> dict[str, date]:
     return firsts
 
 
-def stats(conn, user: dict, today: date, weeks: int, hidden: bool = False) -> dict:
+def stats(conn, user: dict, today: date, weeks: int, hidden: bool = False, monthly: bool | None = None) -> dict:
     """`weeks` = 0 : tout l'historique, depuis la première activité (au moins 4 semaines).
-    `hidden` : compter les activités masquées."""
+    `hidden` : compter les activités masquées. `monthly` : imposer (ou non) le regroupement par mois."""
     firsts = first_days(conn, user["id"], hidden)
     if weeks == 0:
         weeks = max(4, weeks_since(min(firsts.values()), today)) if firsts else 4
-    recent = activities(conn, user["id"], since=stats_start(today, weeks), hidden=hidden)
-    return {"weeks": weeks, "categories": category_stats(recent, today, weeks, firsts)}
+    recent = activities(conn, user["id"], since=stats_start(today, weeks, monthly), hidden=hidden)
+    return {"weeks": weeks, "categories": category_stats(recent, today, weeks, firsts, monthly)}
 
 
 def load_series(conn, user: dict, until: date) -> list:

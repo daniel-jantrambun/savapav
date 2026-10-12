@@ -8,7 +8,7 @@ on:
       - "compose.yaml"
       - "Dockerfile"
       - "web/**"
-#       - ".github/workflows/test-build-deploy.yml"
+      - ".github/workflows/test-build-deploy.yml"
   pull_request:
   workflow_dispatch:
 

@@ -29,9 +29,16 @@ const PERIODS = [
 const PACE_STEPS = [5, 10, 15, 20, 30, 60, 120, 300];
 const SAVED_KEY = "savapav.graphs";
 
-type Saved = { type?: string; periode?: string };
+type Saved = { type?: string; periode?: string; par?: string };
+type Grouping = "semaine" | "mois";
+const GROUPINGS: { value: Grouping; label: string }[] = [
+  { value: "semaine", label: "Par semaine" },
+  { value: "mois", label: "Par mois" },
+];
+// Le choix semaine / mois est proposé à partir d'un an.
+const canGroup = (weeks: number) => weeks === 0 || weeks >= 52;
 
-// Derniers choix (type, période), retenus par le navigateur : repris quand l'URL ne les précise pas.
+// Derniers choix (type, période, regroupement), retenus par le navigateur : repris quand l'URL ne les précise pas.
 function readSaved(): Saved {
   try {
     return JSON.parse(localStorage.getItem(SAVED_KEY) ?? "{}");
@@ -72,13 +79,16 @@ export function GraphsPage() {
   const [list, setList] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useShowHidden();
+  const par = params.get("par") ?? saved.par;
+  // Sans choix (ou sous un an) : automatique, par mois au-delà de 5 ans.
+  const by = !canGroup(weeks) ? "auto" : par === "mois" ? "month" : par === "semaine" ? "week" : "auto";
 
   useEffect(() => {
     api
-      .stats(weeks, showHidden)
+      .stats(weeks, showHidden, by)
       .then(setStats)
       .catch((e) => setError(errorMessage(e)));
-  }, [weeks, showHidden]);
+  }, [weeks, showHidden, by]);
 
   const available = stats ? CATEGORY_ORDER.filter((c) => stats.categories[c]) : [];
   // Type mémorisé : seulement s'il a des activités sur la période (l'URL, elle, est suivie telle quelle).
@@ -95,12 +105,17 @@ export function GraphsPage() {
       .catch((e) => setError(errorMessage(e)));
   }, [cat, weeks, showHidden]);
 
-  function select(next: { type?: Category; periode?: number }) {
+  function select(next: { type?: Category; periode?: number; par?: Grouping }) {
     const p = new URLSearchParams(params);
     p.set("type", next.type ?? cat ?? "");
     p.set("periode", String(next.periode ?? weeks));
-    if (!p.get("type")) p.delete("type");
-    save({ type: p.get("type") ?? undefined, periode: p.get("periode") ?? undefined });
+    p.set("par", next.par ?? par ?? "");
+    for (const key of ["type", "par"]) if (!p.get(key)) p.delete(key);
+    save({
+      type: p.get("type") ?? undefined,
+      periode: p.get("periode") ?? undefined,
+      par: p.get("par") ?? undefined,
+    });
     setParams(p, { replace: true });
   }
 
@@ -112,7 +127,7 @@ export function GraphsPage() {
   const isSpeed = cat === "bike";
   // Durée réellement affichée : chaque discipline démarre à sa première activité.
   const multiYear = (data?.weeks.length ?? 0) > 52;
-  // Au-delà de 5 ans, le serveur regroupe par mois.
+  // Regroupement choisi, ou automatique (par mois au-delà de 5 ans) : le serveur l'indique.
   const monthly = data?.bucket === "month";
   const per = monthly ? "par mois" : "par semaine";
   // Infobulles : date complète (avec l'année au-delà d'un an), ou mois et année.
@@ -126,10 +141,13 @@ export function GraphsPage() {
             year: multiYear ? "numeric" : undefined,
           })}`,
     ) ?? [];
-  // Axe des abscisses : étiquettes courtes (~48 px chacune), « janv. 26 » au-delà d'un an.
+  // Axe des abscisses : étiquettes courtes (~48 px chacune), « janv. 26 » par mois ou au-delà d'un an.
   const axisLabels =
     data?.weeks.map((w) =>
-      dayLabel(w.start, multiYear ? { month: "short", year: "2-digit" } : { day: "numeric", month: "short" }),
+      dayLabel(
+        w.start,
+        monthly || multiYear ? { month: "short", year: "2-digit" } : { day: "numeric", month: "short" },
+      ),
     ) ?? [];
 
   return (
@@ -163,6 +181,25 @@ export function GraphsPage() {
             </button>
           ))}
         </fieldset>
+        {canGroup(weeks) && (
+          <fieldset className="flex flex-wrap gap-2">
+            <legend className="sr-only">Regroupement</legend>
+            {GROUPINGS.map((g) => {
+              const active = (g.value === "mois") === (data?.bucket === "month");
+              return (
+                <button
+                  key={g.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => select({ par: g.value })}
+                  className={chipClass(active)}
+                >
+                  {g.label}
+                </button>
+              );
+            })}
+          </fieldset>
+        )}
         <Checkbox label="Afficher les activités cachées" checked={showHidden} onChange={setShowHidden} />
       </div>
 

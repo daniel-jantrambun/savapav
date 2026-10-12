@@ -27,6 +27,7 @@ import {
   swimPace,
   todayIso,
 } from "../format";
+import { Markdown } from "../Markdown";
 import { Alert, Button, buttonClass, Card, errorMessage, Spinner } from "../ui";
 
 const NARRATE_POLL_MS = 10_000;
@@ -425,8 +426,8 @@ function WeekCard({
         <div className="space-y-3 border-t border-border px-4 py-3">
           <ul className="divide-y divide-border">{children}</ul>
           {text && (
-            <blockquote className="rounded-lg bg-surface-2 px-3 py-2 text-sm whitespace-pre-line text-ink-2">
-              {text}
+            <blockquote className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink-2">
+              <Markdown text={text} />
             </blockquote>
           )}
         </div>
