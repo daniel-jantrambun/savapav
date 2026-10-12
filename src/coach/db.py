@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS activities (
     max_hr           REAL,
     avg_power        REAL,
     file_path        TEXT,
+    hidden           INTEGER NOT NULL DEFAULT 0,  -- masquée des listes et graphes (choix de l'utilisateur)
     PRIMARY KEY (user_id, id)
 );
 CREATE INDEX IF NOT EXISTS activities_user_start ON activities (user_id, start_time);
@@ -95,6 +96,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "sub_sport" not in columns:
         # v3 : sous-sport, pour classer les séances (salle, home trainer...). Rempli au prochain import.
         conn.execute("ALTER TABLE activities ADD COLUMN sub_sport TEXT")
+        conn.commit()
+    if "hidden" not in columns:
+        # v4 : activités masquées. Hors de ACTIVITY_COLUMNS : un réimport ne les fait pas réapparaître.
+        conn.execute("ALTER TABLE activities ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
 

@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useEffect,
   useRef,
+  useState,
 } from "react";
 
 export function Card({
@@ -141,4 +142,51 @@ export function ConfirmDialog({
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Erreur inattendue";
+}
+
+const SHOW_HIDDEN_KEY = "savapav.showHidden";
+
+/** Afficher ou non les activités cachées : même choix sur Activités et Graphes, retenu par le navigateur. */
+export function useShowHidden() {
+  const [show, setShow] = useState(() => {
+    try {
+      return localStorage.getItem(SHOW_HIDDEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const update = (next: boolean) => {
+    setShow(next);
+    try {
+      localStorage.setItem(SHOW_HIDDEN_KEY, next ? "1" : "0");
+    } catch {
+      // stockage indisponible (navigation privée) : le choix vaut pour cette page seulement
+    }
+  };
+  return [show, update] as const;
+}
+
+export function Checkbox({
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex min-h-10 items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        className="size-4 accent-[var(--accent)]"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+      />
+      {label}
+    </label>
+  );
 }

@@ -70,6 +70,42 @@ def test_category_stats_by_calendar_week():
     assert run[-1] == {"start": "2026-10-05", "sessions": 2, "minutes": 67, "km": 10.0,
                        "speed_m_s": round(10000 / 3000, 3), "avg_hr": round((150 * 3000 + 120 * 1000) / 4000)}
     assert stats["gym"]["total"]["sessions"] == 1 and stats["gym"]["total"]["speed_m_s"] is None
+    assert stats["run"]["bucket"] == "week"
+
+
+def test_category_stats_by_month_above_five_years():
+    today = date(2026, 10, 8)
+    acts = [
+        {"start_time": "2026-10-06T07:00:00+00:00", "sport": "running", "duration_s": 3000, "distance_m": 10000,
+         "avg_hr": 150},
+        {"start_time": "2026-10-01T07:00:00+00:00", "sport": "running", "duration_s": 1000, "distance_m": None,
+         "avg_hr": 120},
+        {"start_time": "2016-11-15T07:00:00+00:00", "sport": "running", "duration_s": 1800, "distance_m": 5000,
+         "avg_hr": None},
+    ]
+    run = category_stats(acts, today, 520)["run"]
+    assert run["bucket"] == "month"
+    assert run["weeks"][0]["start"] == "2016-10-01"  # 1er du mois du lundi 17 octobre 2016
+    assert run["weeks"][-1]["start"] == "2026-10-01" and len(run["weeks"]) == 121
+    assert run["weeks"][1] == {"start": "2016-11-01", "sessions": 1, "minutes": 30, "km": 5.0,
+                              "speed_m_s": round(5000 / 1800, 3), "avg_hr": None}
+    assert run["weeks"][-1] == {"start": "2026-10-01", "sessions": 2, "minutes": 67, "km": 10.0,
+                                "speed_m_s": round(10000 / 3000, 3), "avg_hr": round((150 * 3000 + 120 * 1000) / 4000)}
+
+
+def test_category_stats_start_at_first_activity_of_each_type():
+    today = date(2026, 10, 8)
+    acts = [
+        {"start_time": "2026-09-30T07:00:00+00:00", "sport": "running", "duration_s": 1800, "distance_m": 5000,
+         "avg_hr": None},
+        {"start_time": "2026-10-06T07:00:00+00:00", "sport": "cycling", "duration_s": 3600, "distance_m": 30000,
+         "avg_hr": None},
+    ]
+    # Course pratiquée bien avant la période : ses 12 semaines restent ; vélo commencé le 6 octobre : 1 semaine.
+    firsts = {"run": date(2020, 1, 1), "bike": date(2026, 10, 6)}
+    stats = category_stats(acts, today, 12, firsts)
+    assert len(stats["run"]["weeks"]) == 12
+    assert [w["start"] for w in stats["bike"]["weeks"]] == ["2026-10-05"]
 
 
 @pytest.mark.parametrize("pool, per_100", [(25.0, 4), (50.0, 2)])

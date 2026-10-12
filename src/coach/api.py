@@ -54,6 +54,10 @@ class GarminMfaIn(BaseModel):
     code: str
 
 
+class ActivityPatchIn(BaseModel):
+    hidden: bool
+
+
 class GoalIn(BaseModel):
     distance_km: float = Field(gt=0, le=100)
     target_time_s: int = Field(gt=0)
@@ -270,12 +274,21 @@ def create_app(settings: Settings) -> FastAPI:
 
     @api.get("/activities")
     def list_activities(user: User, conn: Conn, limit: int = 50, category: str | None = None,
-                        offset: int = Query(default=0, ge=0)):
-        return service.activities_with_category(conn, user["id"], category, limit, offset)
+                        offset: int = Query(default=0, ge=0), hidden: bool = False):
+        # hidden : inclure les activités masquées.
+        return service.activities_with_category(conn, user["id"], category, limit, offset, hidden)
 
     @api.get("/activities/category")
-    def list_activities_by_category(user: User, conn: Conn, limit: int = 50, category: str | None = None, weeks: int = 26):
-        return service.activities_with_category_and_weeks(conn, user["id"], category, weeks, limit)
+    def list_activities_by_category(user: User, conn: Conn, limit: int = 50, category: str | None = None, weeks: int = 26,
+                                    hidden: bool = False):
+        return service.activities_with_category_and_weeks(conn, user["id"], category, weeks, limit, hidden)
+
+    @api.delete("/activities")
+    def delete_activities(user: User, conn: Conn):
+        running = [p for p in (file_imports.get(user["id"]), full_syncs.get(user["id"])) if p and p.running]
+        if running:
+            raise HTTPException(409, "Import ou synchronisation en cours : réessayez une fois terminé")
+        return {"deleted": service.delete_activities(conn, user["id"])}
 
     # Avant /activities/{activity_id}, qui capterait sinon « import ».
     @api.get("/activities/import")
@@ -318,9 +331,18 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(404)
         return detail
 
+    @api.patch("/activities/{activity_id}")
+    def update_activity(activity_id: str, body: ActivityPatchIn, user: User, conn: Conn):
+        if not service.set_hidden(conn, user["id"], activity_id, body.hidden):
+            raise HTTPException(404)
+        return {"hidden": body.hidden}
+
     @api.get("/stats")
-    def stats(user: User, conn: Conn, weeks: int = Query(default=26, ge=4)):
-        return service.stats(conn, user, date.today(), weeks)
+    def stats(user: User, conn: Conn, weeks: int = Query(default=26, ge=0), hidden: bool = False):
+        # 0 : tout l'historique.
+        if 0 < weeks < 4:
+            raise HTTPException(422, "Au moins 4 semaines")
+        return service.stats(conn, user, date.today(), weeks, hidden)
 
     @api.get("/load")
     def load(user: User, conn: Conn, days: int = 120):

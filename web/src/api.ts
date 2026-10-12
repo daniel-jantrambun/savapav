@@ -156,6 +156,14 @@ export type Activity = {
   avg_hr: number | null;
   max_hr: number | null;
   avg_power: number | null;
+  hidden: boolean;
+  // Discipline d'une séance multisport (triathlon...) : position dans l'enchaînement, toutes les disciplines.
+  multisport: {
+    kind: "triathlon" | "duathlon" | "aquathlon" | "multisport";
+    position: number;
+    count: number;
+    parts: { id: string; category: Category }[];
+  } | null;
 };
 
 export type Streams = {
@@ -188,7 +196,10 @@ export type WeekStat = {
 
 export type Stats = {
   weeks: number;
-  categories: Partial<Record<Category, { weeks: WeekStat[]; total: Omit<WeekStat, "start"> }>>;
+  // Au-delà de 5 ans, `weeks` contient des mois (`bucket: "month"`, `start` = 1er du mois).
+  categories: Partial<
+    Record<Category, { bucket: "week" | "month"; weeks: WeekStat[]; total: Omit<WeekStat, "start"> }>
+  >;
 };
 
 export type LoadPoint = { day: string; load: number; ctl: number; atl: number; tsb: number };
@@ -287,23 +298,27 @@ export const api = {
   resetPassword: (id: number, new_password: string) =>
     request<void>("POST", `/admin/users/${id}/password`, { new_password }),
 
-  activities: (limit = 50, category?: Category, offset = 0) =>
+  // hidden : inclure les activités cachées.
+  activities: (limit = 50, category?: Category, offset = 0, hidden = false) =>
     request<Activity[]>(
       "GET",
-      `/activities?limit=${limit}&offset=${offset}${category ? `&category=${category}` : ""}`,
+      `/activities?limit=${limit}&offset=${offset}&hidden=${hidden}${category ? `&category=${category}` : ""}`,
     ),
-  activitiesCat: (limit = 50, category: Category, weeks: number) =>
+  activitiesCat: (limit = 50, category: Category, weeks: number, hidden = false) =>
     request<Activity[]>(
       "GET",
-      `/activities/category?limit=${limit}&weeks=${weeks}&category=${category}`,
+      `/activities/category?limit=${limit}&weeks=${weeks}&category=${category}&hidden=${hidden}`,
     ),
+  setActivityHidden: (id: string, hidden: boolean) =>
+    request<{ hidden: boolean }>("PATCH", `/activities/${encodeURIComponent(id)}`, { hidden }),
   activity: (id: string) => request<ActivityDetail>("GET", `/activities/${encodeURIComponent(id)}`),
-  stats: (weeks: number) => request<Stats>("GET", `/stats?weeks=${weeks}`),
+  stats: (weeks: number, hidden = false) => request<Stats>("GET", `/stats?weeks=${weeks}&hidden=${hidden}`),
   importFile: (file: File) => {
     const form = new FormData();
     form.append("file", file);
     return request<ImportProgress>("POST", "/activities/import", form);
   },
+  deleteActivities: () => request<{ deleted: number }>("DELETE", "/activities"),
   importStatus: () => request<ImportProgress>("GET", "/activities/import"),
   load: (days = 120) => request<LoadPoint[]>("GET", `/load?days=${days}`),
 

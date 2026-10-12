@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { type ActivityDetail, api, type Streams } from "../api";
 import { BarChart, LineChart, robustDomain } from "../charts";
-import { activityLabel, CATEGORIES, duration, km, speedLabel, swimPace } from "../format";
-import { Alert, Card, errorMessage, Spinner } from "../ui";
+import { activityLabel, CATEGORIES, duration, km, MULTISPORT_LABELS, speedLabel, swimPace } from "../format";
+import { Alert, Card, Checkbox, errorMessage, Spinner } from "../ui";
 
 const PACE_STEPS = [5, 10, 15, 20, 30, 60, 120, 300];
 
@@ -80,6 +80,8 @@ export function ActivityDetailPage() {
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activityId) return;
@@ -91,6 +93,20 @@ export function ActivityDetailPage() {
 
   if (error) return <Alert>{error}</Alert>;
   if (!detail) return <Spinner />;
+
+  async function toggleHidden(hidden: boolean) {
+    if (!detail) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.setActivityHidden(detail.id, hidden);
+      setDetail({ ...detail, hidden });
+    } catch (e) {
+      setSaveError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const cat = detail.category;
   const s = detail.streams;
@@ -142,6 +158,38 @@ export function ActivityDetailPage() {
         <h1 className="text-2xl font-semibold">
           <span aria-hidden>{CATEGORIES[cat].icon}</span> {activityLabel(detail)}
         </h1>
+        {detail.multisport && (
+          <nav
+            aria-label="Disciplines de la séance"
+            className="mt-2 flex flex-wrap items-center gap-1 text-sm"
+          >
+            <span className="text-ink-3">
+              {MULTISPORT_LABELS[detail.multisport.kind]} {detail.multisport.position}/
+              {detail.multisport.count} :
+            </span>
+            {detail.multisport.parts.map((part, i) => (
+              <span key={part.id} className="flex items-center gap-1">
+                {i > 0 && (
+                  <span aria-hidden className="text-ink-3">
+                    →
+                  </span>
+                )}
+                {part.id === detail.id ? (
+                  <span aria-current="page" className="rounded bg-surface-2 px-1.5 py-0.5 font-medium">
+                    {CATEGORIES[part.category].icon} {CATEGORIES[part.category].label}
+                  </span>
+                ) : (
+                  <Link
+                    to={`/activites/${encodeURIComponent(part.id)}`}
+                    className="rounded px-1.5 py-0.5 text-accent underline"
+                  >
+                    {CATEGORIES[part.category].icon} {CATEGORIES[part.category].label}
+                  </Link>
+                )}
+              </span>
+            ))}
+          </nav>
+        )}
         <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Tile label="Durée" value={duration(detail.duration_s)} />
           {detail.distance_m ? (
@@ -176,6 +224,22 @@ export function ActivityDetailPage() {
             <Tile label="Puissance moy." value={`${Math.round(detail.avg_power)} W`} />
           ) : null}
         </dl>
+        <div className="mt-4 border-t border-border pt-3">
+          <Checkbox
+            label="Cacher cette activité"
+            checked={detail.hidden}
+            onChange={toggleHidden}
+            disabled={saving}
+          />
+          <p className="text-xs text-ink-3">
+            Elle n'apparaît plus dans les listes ni les graphes, sauf si vous affichez les activités cachées.
+          </p>
+          {saveError && (
+            <div className="mt-2">
+              <Alert>{saveError}</Alert>
+            </div>
+          )}
+        </div>
       </Card>
 
       {detail.unavailable && <Alert kind="info">Courbes indisponibles : {detail.unavailable}.</Alert>}

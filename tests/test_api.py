@@ -127,6 +127,105 @@ def test_file_import_runs_in_background(settings, conn):
     assert bad.status_code == 422
 
 
+def test_delete_activities_only_touches_own_rows(settings, conn):
+    from coach.db import upsert_activity
+
+    for name in ("alice", "bob"):
+        user_id = auth.authenticate(conn, name, PASSWORD)["id"]
+        upsert_activity(conn, {"user_id": user_id, "id": f"fit:{name}", "source": "fit", "sport": "running",
+                               "start_time": "2026-10-01T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000})
+    conn.commit()
+    alice, bob = client_for(settings, "alice"), client_for(settings, "bob")
+    assert alice.delete("/api/activities").json() == {"deleted": 1}
+    assert alice.get("/api/activities").json() == []
+    assert [a["id"] for a in bob.get("/api/activities").json()] == ["fit:bob"]
+    assert alice.delete("/api/activities").json() == {"deleted": 0}
+
+
+def test_stats_all_history_starts_at_first_activity(settings, conn):
+    from datetime import date
+
+    from coach import service
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    alice = client_for(settings, "alice")
+    today = date(2026, 10, 12)  # lundi
+    assert service.stats(conn, {"id": alice_id}, today, 0) == {"weeks": 4, "categories": {}}  # aucune activité
+    for id_, sport, day in (("old", "running", "2014-10-01"), ("bike", "cycling", "2026-09-30")):
+        upsert_activity(conn, {"user_id": alice_id, "id": f"fit:{id_}", "source": "fit", "sport": sport,
+                               "start_time": f"{day}T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000})
+    conn.commit()
+
+    stats = service.stats(conn, {"id": alice_id}, today, 0)
+    run, bike = stats["categories"]["run"], stats["categories"]["bike"]
+    assert service.stats_start(today, stats["weeks"]) == date(2014, 9, 1)  # 1er du mois de la 1re activité
+    assert run["bucket"] == "month" and run["weeks"][0]["start"] == "2014-09-01"
+    assert run["weeks"][1]["start"] == "2014-10-01" and run["weeks"][1]["sessions"] == 1
+    # Le vélo démarre à sa propre première activité, par semaine : 3 semaines et non 12 ans de mois vides.
+    assert bike["bucket"] == "week" and [w["start"] for w in bike["weeks"]] == ["2026-09-28", "2026-10-05", "2026-10-12"]
+    # Sur une période plus courte que l'historique, les semaines vides restent (la course ne commence pas là).
+    year = service.stats(conn, {"id": alice_id}, today, 52)["categories"]
+    assert set(year) == {"bike"} and len(year["bike"]["weeks"]) == 3
+
+    assert alice.get("/api/stats?weeks=0").json()["categories"]["run"]["total"]["sessions"] == 1
+    assert alice.get("/api/stats?weeks=260").json()["categories"]["bike"]["total"]["sessions"] == 1
+    assert [a["id"] for a in alice.get("/api/activities/category?category=run&weeks=0").json()] == ["fit:old"]
+
+
+def test_hidden_activities_are_filtered_unless_requested(settings, conn):
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    for id_, day in (("old", "2026-09-01"), ("new", "2026-10-01")):
+        upsert_activity(conn, {"user_id": alice_id, "id": f"fit:{id_}", "source": "fit", "sport": "running",
+                               "start_time": f"{day}T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000})
+    conn.commit()
+    alice, bob = client_for(settings, "alice"), client_for(settings, "bob")
+
+    assert bob.patch("/api/activities/fit:old", json={"hidden": True}).status_code == 404  # l'activité d'un autre
+    assert alice.patch("/api/activities/fit:old", json={"hidden": True}).json() == {"hidden": True}
+    assert alice.get("/api/activities/fit:old").json()["hidden"] is True
+
+    assert [a["id"] for a in alice.get("/api/activities").json()] == ["fit:new"]
+    assert [a["id"] for a in alice.get("/api/activities?hidden=true").json()] == ["fit:new", "fit:old"]
+    assert [a["id"] for a in alice.get("/api/activities/category?category=run&weeks=0").json()] == ["fit:new"]
+    assert alice.get("/api/stats?weeks=0").json()["categories"]["run"]["total"]["sessions"] == 1
+    assert alice.get("/api/stats?weeks=0&hidden=true").json()["categories"]["run"]["total"]["sessions"] == 2
+
+    # Un réimport du même fichier ne fait pas réapparaître l'activité.
+    upsert_activity(conn, {"user_id": alice_id, "id": "fit:old", "source": "fit", "sport": "running",
+                           "start_time": "2026-09-01T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000})
+    conn.commit()
+    assert alice.get("/api/activities/fit:old").json()["hidden"] is True
+    assert alice.patch("/api/activities/fit:old", json={"hidden": False}).json() == {"hidden": False}
+    assert len(alice.get("/api/activities").json()) == 2
+
+
+def test_multisport_sessions_are_grouped_by_file(settings, conn):
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    legs = [("fit:tri", "swimming", "07:00"), ("fit:tri:2", "cycling", "07:30"), ("fit:tri:4", "running", "09:00")]
+    for id_, sport, time in legs:
+        upsert_activity(conn, {"user_id": alice_id, "id": id_, "source": "fit", "sport": sport,
+                               "start_time": f"2026-10-04T{time}:00+00:00", "duration_s": 1500,
+                               "distance_m": 1000, "file_path": "/fit/tri.fit"})
+    upsert_activity(conn, {"user_id": alice_id, "id": "fit:solo", "source": "fit", "sport": "running",
+                           "start_time": "2026-10-05T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000,
+                           "file_path": "/fit/solo.fit"})
+    conn.commit()
+    alice = client_for(settings, "alice")
+
+    by_id = {a["id"]: a["multisport"] for a in alice.get("/api/activities").json()}
+    assert by_id["fit:solo"] is None
+    assert by_id["fit:tri:2"]["kind"] == "triathlon"
+    assert (by_id["fit:tri:2"]["position"], by_id["fit:tri:2"]["count"]) == (2, 3)
+    assert [p["category"] for p in by_id["fit:tri"]["parts"]] == ["swim", "bike", "run"]
+    assert alice.get("/api/activities/fit:tri:4").json()["multisport"]["position"] == 3
+    assert alice.get("/api/activities/category?category=bike&weeks=0").json()[0]["multisport"]["kind"] == "triathlon"
+
+
 def test_serves_web_app_with_spa_fallback(settings, conn, tmp_path):
     web = tmp_path / "web"
     (web / "assets").mkdir(parents=True)

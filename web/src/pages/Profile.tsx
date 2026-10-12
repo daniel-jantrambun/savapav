@@ -1,7 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { api, type GarminStatus } from "../api";
 import { useAuth, useUser } from "../auth";
-import { Alert, Button, Card, errorMessage, Field, Spinner } from "../ui";
+import { Alert, Button, Card, ConfirmDialog, errorMessage, Field, Spinner } from "../ui";
 
 type Message = { kind: "error" | "success"; text: string } | null;
 
@@ -11,6 +11,7 @@ export function ProfilePage() {
     <>
       <ProfileCard />
       <GarminCard />
+      <DataCard />
       <PasswordCard />
       <Button variant="danger" className="w-full sm:w-auto" onClick={logout}>
         Se déconnecter
@@ -212,6 +213,57 @@ function GarminCard() {
           <Alert kind={message.kind}>{message.text}</Alert>
         </div>
       )}
+    </Card>
+  );
+}
+
+function DataCard() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<Message>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function deleteActivities() {
+    setConfirmDelete(false);
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { deleted } = await api.deleteActivities();
+      setMessage({ kind: "success", text: `${deleted} activité(s) supprimée(s) de l'application.` });
+    } catch (e) {
+      setMessage({ kind: "error", text: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Données">
+      <div className="space-y-3">
+        <p className="text-sm text-ink-2">
+          Efface toutes vos activités de l'application, qu'elles viennent de Garmin ou d'un import de
+          fichiers.
+        </p>
+        <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={busy}>
+          {busy ? "Suppression…" : "Supprimer mes activités"}
+        </Button>
+        {message && <Alert kind={message.kind}>{message.text}</Alert>}
+      </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Supprimer toutes vos activités ?"
+        confirmLabel="Supprimer"
+        onConfirm={deleteActivities}
+        onCancel={() => setConfirmDelete(false)}
+      >
+        <p>
+          Toutes vos activités sont effacées de l'application : la liste, les graphes et la courbe
+          forme/fatigue repartent de zéro. Vos plans sont conservés.
+        </p>
+        <p>
+          Votre compte Garmin Connect n'est pas touché. Les fichiers déjà téléchargés restent sur le NAS : la
+          prochaine synchro Garmin les réimportera.
+        </p>
+      </ConfirmDialog>
     </Card>
   );
 }

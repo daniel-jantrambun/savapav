@@ -9,7 +9,17 @@ import {
   type SyncProgress,
 } from "../api";
 import { LoadChart } from "../LoadChart";
-import { Alert, Button, buttonClass, Card, ConfirmDialog, errorMessage, Spinner } from "../ui";
+import {
+  Alert,
+  Button,
+  buttonClass,
+  Card,
+  Checkbox,
+  ConfirmDialog,
+  errorMessage,
+  Spinner,
+  useShowHidden,
+} from "../ui";
 import { ActivityList } from "./Graphs";
 
 const FULL_SYNC_POLL_MS = 3000;
@@ -44,10 +54,11 @@ export function ActivitiesPage() {
   const [confirmFull, setConfirmFull] = useState(false);
   const [fullSync, setFullSync] = useState<SyncProgress | null>(null);
   const [importJob, setImportJob] = useState<ImportProgress | null>(null);
+  const [showHidden, setShowHidden] = useShowHidden();
 
   const reload = useCallback(() => {
     // Une activité de plus que la page : indique s'il en reste à afficher.
-    Promise.all([api.activities(PAGE_SIZE + 1), api.load(), api.garminStatus()])
+    Promise.all([api.activities(PAGE_SIZE + 1, undefined, 0, showHidden), api.load(), api.garminStatus()])
       .then(([a, l, g]) => {
         setActivities(a.slice(0, PAGE_SIZE));
         setHasMore(a.length > PAGE_SIZE);
@@ -55,7 +66,7 @@ export function ActivitiesPage() {
         setGarmin(g);
       })
       .catch((e) => setMessage({ kind: "error", text: errorMessage(e) }));
-  }, []);
+  }, [showHidden]);
 
   useEffect(reload, [reload]);
 
@@ -116,7 +127,7 @@ export function ActivitiesPage() {
     const shown = activities ?? [];
     setLoadingMore(true);
     try {
-      const next = await api.activities(PAGE_SIZE + 1, undefined, shown.length);
+      const next = await api.activities(PAGE_SIZE + 1, undefined, shown.length, showHidden);
       setActivities([...shown, ...next.slice(0, PAGE_SIZE)]);
       setHasMore(next.length > PAGE_SIZE);
     } catch (e) {
@@ -275,6 +286,9 @@ export function ActivitiesPage() {
       </ConfirmDialog>
 
       <Card title="Dernières activités">
+        <div className="-mt-2 mb-2">
+          <Checkbox label="Afficher les activités cachées" checked={showHidden} onChange={setShowHidden} />
+        </div>
         {activities === null ? (
           <Spinner />
         ) : activities.length === 0 ? (

@@ -1,4 +1,4 @@
-import type { Axis, BlockSession, Category, SessionKind, Sport, Week } from "./api";
+import type { Activity, Axis, BlockSession, Category, SessionKind, Sport, Week } from "./api";
 
 export const KIND_LABELS: Record<SessionKind, string> = {
   easy: "Footing",
@@ -146,3 +146,10 @@ export function distanceLabel(distanceKm: number): string {
   if (Math.abs(distanceKm - 21.1) < 0.1) return "Semi-marathon";
   return km(distanceKm);
 }
+
+export const MULTISPORT_LABELS: Record<NonNullable<Activity["multisport"]>["kind"], string> = {
+  triathlon: "Triathlon",
+  duathlon: "Duathlon",
+  aquathlon: "Aquathlon",
+  multisport: "Multisport",
+};
