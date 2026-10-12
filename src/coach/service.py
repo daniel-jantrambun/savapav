@@ -1,6 +1,7 @@
 """Opérations partagées entre l'API et la CLI. Tout est filtré par utilisateur."""
 
 import json
+import logging
 from dataclasses import asdict
 from datetime import date
 
@@ -11,8 +12,6 @@ from coach.load import daily_loads, fitness_series, recent_weekly_km
 from coach.multisport import Preferences, build_block, validate_block
 from coach.planner import Goal, build_plan, validate_plan
 from coach.sports import analyze, category, category_stats, stats_start, weeks_since
-
-import logging
 
 logging.basicConfig(level=logging.INFO)
 
@@ -79,7 +78,9 @@ def _with_multisport(conn, user_id: int, rows: list[dict]) -> list[dict]:
 
 def activities_with_category(conn, user_id: int, cat: str | None = None, limit: int | None = None,
                              offset: int = 0, hidden: bool = False) -> list[dict]:
-    rows = [{**a, "category": category(a["sport"], a.get("sub_sport"))} for a in activities(conn, user_id, hidden=hidden)]
+    rows = [
+        {**a, "category": category(a["sport"], a.get("sub_sport"))} for a in activities(conn, user_id, hidden=hidden)
+    ]
     if cat:
         rows = [a for a in rows if a["category"] == cat]
     rows = rows[offset:]
@@ -88,12 +89,17 @@ def activities_with_category(conn, user_id: int, cat: str | None = None, limit: 
 def activities_with_category_and_weeks(conn, user_id: int, cat: str,
                              weeks: int , limit: int | None = None, hidden: bool = False) -> list[dict]:
     ## Récupère les activités d'un utilisateur sur un nombre de semaines donné.
-    rows = [{**a, "category": category(a["sport"], a.get("sub_sport"))} for a in activities(conn, user_id, limit=limit, since=stats_start(date.today(), weeks) if weeks else None, hidden=hidden)]
-    logging.info(f"activities_with_category_and_weeks: user_id={user_id}, cat={cat}, weeks={weeks}, limit={limit}, rows={len(rows)}")
-    # Filtre par catégorie 
+    since = stats_start(date.today(), weeks) if weeks else None
+    rows = [
+        {**a, "category": category(a["sport"], a.get("sub_sport"))}
+        for a in activities(conn, user_id, limit=limit, since=since, hidden=hidden)
+    ]
+    logging.info(f"activities_with_category_and_weeks: user_id={user_id}, cat={cat}, weeks={weeks}, "
+                 f"limit={limit}, rows={len(rows)}")
+    # Filtre par catégorie
     rows = [a for a in rows if a["category"] == cat]
     logging.info(f"activities_with_category_and_weeks: after cat filter - limit={limit}, rows={len(rows)}")
-        
+
     return _with_multisport(conn, user_id, rows)
 
 

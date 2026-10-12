@@ -163,7 +163,8 @@ def test_stats_all_history_starts_at_first_activity(settings, conn):
     assert run["bucket"] == "month" and run["weeks"][0]["start"] == "2014-09-01"
     assert run["weeks"][1]["start"] == "2014-10-01" and run["weeks"][1]["sessions"] == 1
     # Le vélo démarre à sa propre première activité, par semaine : 3 semaines et non 12 ans de mois vides.
-    assert bike["bucket"] == "week" and [w["start"] for w in bike["weeks"]] == ["2026-09-28", "2026-10-05", "2026-10-12"]
+    assert bike["bucket"] == "week"
+    assert [w["start"] for w in bike["weeks"]] == ["2026-09-28", "2026-10-05", "2026-10-12"]
     # Sur une période plus courte que l'historique, les semaines vides restent (la course ne commence pas là).
     year = service.stats(conn, {"id": alice_id}, today, 52)["categories"]
     assert set(year) == {"bike"} and len(year["bike"]["weeks"]) == 3

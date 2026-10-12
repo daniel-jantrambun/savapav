@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, FastAPI, HTTPEx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from coach import api, auth, service
+from coach import auth, service
 from coach.config import Settings, load_settings
 from coach.db import connect
 from coach.ingest import garmin
@@ -279,8 +279,8 @@ def create_app(settings: Settings) -> FastAPI:
         return service.activities_with_category(conn, user["id"], category, limit, offset, hidden)
 
     @api.get("/activities/category")
-    def list_activities_by_category(user: User, conn: Conn, limit: int = 50, category: str | None = None, weeks: int = 26,
-                                    hidden: bool = False):
+    def list_activities_by_category(user: User, conn: Conn, limit: int = 50, category: str | None = None,
+                                    weeks: int = 26, hidden: bool = False):
         return service.activities_with_category_and_weeks(conn, user["id"], category, weeks, limit, hidden)
 
     @api.delete("/activities")
