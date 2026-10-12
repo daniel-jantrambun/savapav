@@ -1,13 +1,13 @@
 name: Test, build Docker image and deploy it on Synology
 
 on:
-#   push:
-#     branches: [main]
-#     tags: ["v*"]
-#     paths:
-#       - "compose.yaml"
-#       - "Dockerfile"
-#       - "web/**"
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "compose.yaml"
+      - "Dockerfile"
+      - "web/**"
 #       - ".github/workflows/test-build-deploy.yml"
   pull_request:
   workflow_dispatch:
