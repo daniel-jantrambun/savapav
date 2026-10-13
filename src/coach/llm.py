@@ -6,8 +6,12 @@ le vrai goulot, bien plus que la génération.
 """
 
 import json
+import logging
+import time
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "Tu es un coach de course à pied. On te donne une semaine d'entraînement en JSON, déjà calculée. "
@@ -91,17 +95,22 @@ def week_prompt(week: dict) -> str:
 
 
 def narrate_week(week: dict, base_url: str, model: str, timeout_s: float, multisport: bool = False) -> str:
+    system = MULTISPORT_PROMPT if multisport else SYSTEM_PROMPT
+    user = multisport_week_prompt(week) if multisport else week_prompt(week)
+    # Prompt et réponse dans les logs du serveur, pour ajuster les consignes au vu de ce que rédige le modèle.
+    log.info("LLM %s, semaine %s — prompt système : %s", model, week["index"] + 1, system)
+    log.info("LLM %s, semaine %s — prompt utilisateur : %s", model, week["index"] + 1, user)
+    started = time.monotonic()
     response = httpx.post(
         f"{base_url.rstrip('/')}/v1/chat/completions",
         json={
             "model": model,
             "temperature": 0.3,
-            "messages": [
-                {"role": "system", "content": MULTISPORT_PROMPT if multisport else SYSTEM_PROMPT},
-                {"role": "user", "content": multisport_week_prompt(week) if multisport else week_prompt(week)},
-            ],
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         },
         timeout=timeout_s,
     )
     response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"].strip()
+    text = response.json()["choices"][0]["message"]["content"].strip()
+    log.info("LLM %s, semaine %s — réponse en %.0f s : %s", model, week["index"] + 1, time.monotonic() - started, text)
+    return text

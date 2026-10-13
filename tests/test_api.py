@@ -255,6 +255,71 @@ def test_multisport_sessions_are_grouped_by_file(settings, conn):
     assert alice.get("/api/activities/category?category=bike&weeks=0").json()[0]["multisport"]["kind"] == "triathlon"
 
 
+def test_performance_scans_then_predicts_and_checks_goal(settings, conn):
+    from datetime import date, timedelta
+
+    from coach import efforts
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    today = date.today()
+    for i in range(6):
+        day = today - timedelta(days=10 * i + 1)
+        id_ = f"fit:run{i}"
+        upsert_activity(conn, {"user_id": alice_id, "id": id_, "source": "fit", "sport": "running",
+                               "start_time": f"{day}T07:00:00+00:00", "duration_s": 2700, "distance_m": 10000,
+                               "avg_hr": 170, "file_path": "/nulle/part.fit"})
+        conn.execute("INSERT INTO best_efforts VALUES (?, ?, 10000, 2700, 170)", (alice_id, id_))
+        conn.execute("UPDATE activities SET efforts_version = ? WHERE id = ?", (efforts.EFFORTS_VERSION, id_))
+    # Une course pas encore analysée (FIT introuvable : analysée sans effort).
+    upsert_activity(conn, {"user_id": alice_id, "id": "fit:new", "source": "fit", "sport": "running",
+                           "start_time": f"{today}T07:00:00+00:00", "duration_s": 1800, "distance_m": 5000,
+                           "file_path": "/nulle/part.fit"})
+    conn.commit()
+    alice = client_for(settings, "alice")
+
+    # 1er appel : l'analyse part en tâche de fond (exécutée par le client de test après la réponse).
+    first = alice.get("/api/performance").json()
+    assert first["status"] == "scanning" and first["scan"]["total"] == 1
+    ready = alice.get("/api/performance").json()
+    assert ready["status"] == "ready" and ready["scan_error"] is None
+    assert ready["method"] == "baseline"
+    ten = next(p for p in ready["predictions"] if p["distance_m"] == 10000)
+    assert ten["time_s"] == round(2700 * (1 + 0.0002 * 2))  # 10 km d'il y a 1 jour, vu depuis demain
+    assert ten["source"]["activity_id"] == "fit:run0"
+    assert ready["records"][0] == {"distance_m": 10000.0, "all_time": ready["records"][0]["all_time"],
+                                   "last_year": ready["records"][0]["last_year"]}
+    assert ready["curve"][-1]["time_s"] == ten["time_s"]
+
+    race = today + timedelta(days=120)
+    goal = alice.get(f"/api/performance/goal?distance_km=10&target_time_s=2500&race_date={race}").json()
+    assert goal["verdict"] == "ambitious" and goal["predicted_s"] == ten["time_s"]
+    goal = alice.get(f"/api/performance/goal?distance_km=10&target_time_s=2650&race_date={race}").json()
+    assert goal["verdict"] == "realistic"
+    assert alice.get("/api/performance/goal?distance_km=10&target_time_s=2650").status_code == 422
+
+    # Recalcul à la demande : toutes les courses repassent (FIT introuvables ici : plus aucun effort ensuite).
+    rescan = alice.post("/api/performance/rescan")
+    assert rescan.status_code == 202 and rescan.json()["scan"]["total"] == 7
+    assert alice.get("/api/performance").json()["records"] == []
+
+
+def test_scan_clears_efforts_of_activities_that_are_not_runs(conn):
+    from coach import efforts
+    from coach.db import upsert_activity
+
+    alice_id = auth.authenticate(conn, "alice", PASSWORD)["id"]
+    # Vélo enregistré comme course : 13,8 km en 30 min (7,7 m/s), avec un effort calculé par une version précédente.
+    upsert_activity(conn, {"user_id": alice_id, "id": "fit:fake", "source": "fit", "sport": "running",
+                           "start_time": "2015-08-11T09:08:00+00:00", "duration_s": 1785, "distance_m": 13780,
+                           "file_path": "/nulle/part.fit"})
+    conn.execute("INSERT INTO best_efforts VALUES (?, 'fit:fake', 1000, 99, NULL)", (alice_id,))
+    conn.commit()
+    assert efforts.scan_pending(conn, alice_id) == 1
+    assert efforts.efforts(conn, alice_id) == []
+    assert efforts.pending(conn, alice_id) == []
+
+
 def test_serves_web_app_with_spa_fallback(settings, conn, tmp_path):
     web = tmp_path / "web"
     (web / "assets").mkdir(parents=True)

@@ -5,7 +5,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from coach import auth, service
+from coach import auth, efforts, service
 from coach.config import load_settings
 from coach.db import connect
 from coach.multisport import AXES, Preferences
@@ -72,6 +72,9 @@ def main() -> None:
     p.add_argument("--runs", type=int, default=4)
 
     p = sub.add_parser("analyze", help="Ce que vous faites, sport par sport (8 dernières semaines)")
+    p.add_argument("--user", required=True)
+
+    p = sub.add_parser("performance", help="Temps estimés (5 km → marathon) ; analyse d'abord les nouvelles courses")
     p.add_argument("--user", required=True)
 
     p = sub.add_parser("block", help="Génère un bloc multisport de 4 semaines, sans objectif chiffré")
@@ -157,6 +160,13 @@ def main() -> None:
     elif args.command == "analyze":
         user = auth.user_for_id(conn, _user_id(conn, args.user))
         print(json.dumps(service.analysis(conn, user, date.today()), ensure_ascii=False, indent=2))
+    elif args.command == "performance":
+        user = auth.user_for_id(conn, _user_id(conn, args.user))
+        scanned = efforts.scan_pending(conn, user["id"])
+        print(f"{scanned} course(s) analysée(s)", file=sys.stderr)
+        summary = service.performance_summary(conn, user, date.today())
+        summary.pop("curve")
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
     elif args.command == "block":
         user = auth.user_for_id(conn, _user_id(conn, args.user))
         focus = {sport: getattr(args, sport) for sport in AXES if getattr(args, sport)}

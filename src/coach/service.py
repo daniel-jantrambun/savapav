@@ -3,8 +3,9 @@
 import json
 import logging
 from dataclasses import asdict
-from datetime import date
+from datetime import date, timedelta
 
+from coach import efforts, performance
 from coach.activity import detail as fit_detail
 from coach.config import Settings
 from coach.llm import narrate_week
@@ -258,3 +259,52 @@ def narrate_plan(conn, settings: Settings, user_id: int, plan_id: int, weeks: li
         conn.commit()
         done += 1
     return done
+
+
+def _performance_key(conn, user: dict, today: date) -> tuple:
+    """Change dès que les activités, leurs meilleurs efforts ou les FC du profil changent."""
+    row = conn.execute(
+        "SELECT COUNT(*), MAX(start_time), SUM(hidden), SUM(efforts_version IS NOT NULL) FROM activities"
+        " WHERE user_id = ?",
+        (user["id"],),
+    ).fetchone()
+    return (*tuple(row), user["hr_rest"], user["hr_max"], today)
+
+
+_predictors: dict[int, tuple[tuple, performance.Predictor]] = {}
+
+
+def predictor(conn, user: dict, today: date) -> performance.Predictor:
+    """Modèle de prédiction de l'utilisateur, recalculé seulement quand ses données changent."""
+    key = _performance_key(conn, user, today)
+    cached = _predictors.get(user["id"])
+    if cached is None or cached[0] != key:
+        model = performance.Predictor(activities(conn, user["id"], hidden=False), efforts.efforts(conn, user["id"]),
+                                      user["hr_rest"], user["hr_max"], today)
+        cached = _predictors[user["id"]] = (key, model)
+    return cached[1]
+
+
+def performance_summary(conn, user: dict, today: date) -> dict:
+    """Temps estimés du jour, méthode retenue et son erreur mesurée, courbe de progression, records."""
+    model = predictor(conn, user, today)
+    tomorrow = today + timedelta(days=1)  # « aujourd'hui » : séances du jour comprises
+    predictions = [p for d in performance.PREDICTED_M if (p := model.predict(tomorrow, d)) is not None]
+    return {
+        "method": model.method,
+        "xgboost_available": model.xgboost_available,
+        "evaluation": model.evaluation,
+        "error": model.error,
+        "predictions": predictions,
+        "curve": model.curve(today),
+        "records": performance.records(efforts.efforts(conn, user["id"]), today),
+    }
+
+
+def check_goal(conn, user: dict, distance_km: float, target_time_s: int, race_date: date, today: date) -> dict:
+    model = predictor(conn, user, today)
+    prediction = model.predict(today + timedelta(days=1), distance_km * 1000)
+    if prediction is None:
+        return {"verdict": None}
+    return {**performance.check_goal(prediction["time_s"], target_time_s, race_date, today), "error": model.error,
+            "source": prediction["source"]}

@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, FastAPI, HTTPEx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from coach import auth, service
+from coach import auth, efforts, service
 from coach.config import Settings, load_settings
 from coach.db import connect
 from coach.ingest import garmin
@@ -79,6 +79,7 @@ def create_app(settings: Settings) -> FastAPI:
     # Synchros Garmin complètes (tout l'historique), par utilisateur : longues, donc en tâche de fond.
     full_syncs: dict[int, garmin.SyncProgress] = {}
     file_imports: dict[int, ImportProgress] = {}
+    effort_scans: dict[int, efforts.ScanProgress] = {}
 
     def db():
         # SQLite : une connexion par requête, simple et suffisant pour une famille.
@@ -354,6 +355,55 @@ def create_app(settings: Settings) -> FastAPI:
     @api.get("/analysis")
     def analysis(user: User, conn: Conn):
         return service.analysis(conn, user, date.today())
+
+    # --- Prédiction de performance -----------------------------------------------------------------------
+
+    def scanning(user: dict, conn, background: BackgroundTasks) -> dict | None:
+        """Analyse des meilleurs efforts en cours, ou lancée s'il reste des courses à analyser (tâche de fond :
+        tout un historique prend plusieurs minutes sur le NAS). None quand tout est à jour."""
+        current = effort_scans.get(user["id"])
+        if current and current.running:
+            return current.to_dict()
+        todo = len(efforts.pending(conn, user["id"]))
+        if not todo:
+            return None
+        progress = effort_scans[user["id"]] = efforts.ScanProgress(total=todo)
+
+        def run():
+            bg_conn = connect(settings.db_path)
+            try:
+                efforts.scan_pending(bg_conn, user["id"], progress)
+                progress.finish()
+            except Exception as e:
+                progress.finish(f"Analyse interrompue : {e}")
+            finally:
+                bg_conn.close()
+
+        background.add_task(run)
+        return progress.to_dict()
+
+    @api.get("/performance")
+    def performance(user: User, conn: Conn, background: BackgroundTasks):
+        if (scan := scanning(user, conn, background)) is not None:
+            return {"status": "scanning", "scan": scan}
+        last = effort_scans.get(user["id"])
+        return {"status": "ready", "scan_error": last.error if last else None,
+                **service.performance_summary(conn, user, date.today())}
+
+    @api.post("/performance/rescan", status_code=202)
+    def performance_rescan(user: User, conn: Conn, background: BackgroundTasks):
+        """Recalcule les meilleurs efforts de toutes les courses (après un changement de calcul, ou pour vérifier)."""
+        if (current := effort_scans.get(user["id"])) and current.running:
+            raise HTTPException(409, "Analyse déjà en cours")
+        efforts.reset(conn, user["id"])
+        return {"status": "scanning", "scan": scanning(user, conn, background)}
+
+    @api.get("/performance/goal")
+    def performance_goal(user: User, conn: Conn, background: BackgroundTasks, race_date: date,
+                         distance_km: float = Query(gt=0, le=100), target_time_s: int = Query(gt=0)):
+        if scanning(user, conn, background) is not None:
+            return {"verdict": None, "scanning": True}
+        return service.check_goal(conn, user, distance_km, target_time_s, race_date, date.today())
 
     # --- Plans -----------------------------------------------------------------------------------------------
 

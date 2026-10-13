@@ -28,7 +28,7 @@ résumée et revue dans [docs/architecture.md](docs/architecture.md).
 |---|-------|------|
 | 1 | Import des activités (FIT Garmin, sync Garmin Connect) → SQLite | ✅ code prêt, à tester sur les vraies données |
 | 2 | Exploration : charge hebdo, CTL/ATL/TSB | ✅ écran Activités (forme / fatigue) |
-| 3 | Modèle v1 : prédiction de performance (XGBoost) | ⏳ |
+| 3 | Modèle v1 : prédiction de performance (XGBoost) | ✅ temps estimés, vérification d'objectif, progression (écran Activités) |
 | 4 | Planificateur v1 déterministe + garde-fous | ✅ course à pied (objectif daté) et multisport (blocs de 4 semaines) |
 | 5 | Rédaction des séances par le LLM 3B | ✅ code prêt, à tester sur le NAS |
 | 6 | Feedback (RPE) → ajustement du plan | ⏳ |
@@ -85,6 +85,7 @@ L'API est sous `/api` (docs : `/api/docs`).
 
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+brew install libomp   # macOS : OpenMP pour XGBoost (sans lui, la prédiction garde la méthode simple)
 .venv/bin/pytest
 ```
 
@@ -95,6 +96,8 @@ python3.14 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 # Ce que vous faites, sport par sport, puis un bloc multisport de 4 semaines (sport absent = non planifié)
 .venv/bin/coach analyze --user benjamin
 .venv/bin/coach block --user benjamin --sessions 8 --run vitesse --bike endurance --swim technique --gym force
+# Temps estimés (5 km → marathon), méthode retenue et son erreur mesurée, records
+.venv/bin/coach performance --user benjamin
 # Après mise à jour : relire les FIT déjà stockés (sous-sport, sessions vélo/course des fichiers multisport)
 .venv/bin/coach reimport --user benjamin
 # Ou un plan vers une course : semi en 1h45, 4 sorties/semaine

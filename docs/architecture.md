@@ -73,6 +73,34 @@ revus avant de démarrer.
 - **Garde-fous** (`validate_block`) : +10 % max par semaine (par sport, donc au total), 2 séances intenses max
   tous sports confondus, jamais à moins de 48 h, 2 séances max par jour, dernière semaine en décharge.
 
+## Prédiction de performance (course à pied)
+
+- **Meilleurs efforts** (`efforts.py`) : segment le plus rapide de 5 km, 10 km, semi et marathon de chaque
+  course, relu dans le FIT (distance GPS cumulée, temps écoulé). Exclus : tapis et salle (distance de
+  l'accéléromètre), sorties à plus de 6 m/s de moyenne (vélo ou voiture classés en course), segments traversant
+  un saut du GPS (vitesse moyenne > 6 m/s sur 30 s, tunnels). 30 s et non 10 : en enregistrement « intelligent »
+  (un point toutes les 6 à 8 s), le bruit normal (+30 m d'un point à l'autre) dépasse ce seuil sur 10 s.
+  Table `best_efforts`, calculée en tâche de fond au premier affichage puis pour chaque nouvelle course
+  (`activities.efforts_version` : incrémenter `EFFORTS_VERSION` relance le calcul). Un export Garmin (zip de zip)
+  est ouvert une seule fois pour toutes ses activités : ~1 min pour 950 courses sur un Mac, quelques minutes sur
+  le NAS. En CLI : `coach performance --user …`.
+- **Cible** : les efforts « à fond », faute de courses officielles : à 2 % près du meilleur équivalent 10 km
+  (Riegel) sur ± 45 jours, et à au moins 75 % de la FC de réserve quand elle est connue.
+- **Méthode simple** : meilleur effort ≥ 5 km des 180 derniers jours, extrapolé par Riegel (exposant 1,06),
+  pénalisé de 0,02 %/jour d'ancienneté. Pas de 1 km, ni en record ni en prédiction : une descente suffit à le
+  fausser, et Riegel en extrapole des temps trop rapides.
+- **XGBoost** (API native, sans scikit-learn) : apprend l'écart (log) entre l'effort réel et la méthode simple, à
+  partir de la charge (CTL/ATL/TSB), du volume sur 4 et 12 semaines, de la plus longue sortie sur 8 semaines, de
+  l'efficacité cardiaque (vitesse par battement au-dessus du repos) et de la distance. 200 arbres de profondeur 3.
+- **Choix honnête** : validation chronologique (entraîné avant 60, 70, 80, 90 % des efforts, testé sur les 10 %
+  suivants). XGBoost n'est retenu que s'il réduit l'erreur moyenne d'au moins 3 % et avec au moins 60 efforts
+  cibles ; l'écran indique la méthode et son erreur mesurée. Sur l'historique de départ (950 courses, 74 efforts
+  cibles) : 3,5 % d'erreur pour la méthode simple, 3,6 % pour XGBoost → méthode simple.
+- **Vérification d'objectif** : progression jugée atteignable de 1 % par mois de préparation (8 % au plus) ;
+  ambitieux en deçà, prudent si l'objectif est plus de 3 % plus lent que le temps estimé du jour.
+- **Dépendance** : `xgboost-cpu` sous Linux (~6 Mo, OpenMP inclus, sans AVX : compatible J4125) ; sous macOS,
+  `xgboost` demande `brew install libomp`, sans quoi l'app garde la méthode simple.
+
 ## Multi-utilisateurs (famille)
 
 - Comptes créés par l'admin, mot de passe scrypt, sessions côté serveur (seul le hash du jeton est en base).

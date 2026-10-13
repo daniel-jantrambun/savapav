@@ -4,6 +4,10 @@ services:
   app:
     container_name: savapav-web
     image: ghcr.io/daniel-jantrambun/savapav:latest
+    # build:
+    #   context: .
+    #   dockerfile: ./Dockerfile
+      # docker exec savapav-llm ollama pull qwen2.5:3b
     # Le NAS n'accède pas aux registres : l'image est chargée par la CI (docker load).
     pull_policy: never
     restart: unless-stopped

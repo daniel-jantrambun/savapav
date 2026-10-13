@@ -11,6 +11,10 @@ dependencies = [
     "garminconnect>=0.3.5",  # < 0.3.5 : CVE-2026-54447 ; < 0.3 : ancienne connexion garth, cassée
     "cryptography>=43",
     "python-multipart>=0.0.9",
+    # Prédiction de performance. Sous Linux (NAS, CI), la variante sans CUDA : ~6 Mo au lieu de ~300.
+    # Sous macOS, XGBoost a besoin d'OpenMP : brew install libomp (sans lui, l'app garde la méthode simple).
+    "xgboost-cpu>=3.0; sys_platform == 'linux'",
+    "xgboost>=3.0; sys_platform != 'linux'",
 ]
 
 [project.optional-dependencies]

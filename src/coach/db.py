@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -46,9 +46,21 @@ CREATE TABLE IF NOT EXISTS activities (
     avg_power        REAL,
     file_path        TEXT,
     hidden           INTEGER NOT NULL DEFAULT 0,  -- masquée des listes et graphes (choix de l'utilisateur)
+    efforts_version  INTEGER,            -- meilleurs efforts calculés (coach.efforts) ; NULL : pas encore
     PRIMARY KEY (user_id, id)
 );
 CREATE INDEX IF NOT EXISTS activities_user_start ON activities (user_id, start_time);
+
+-- Meilleurs efforts d'une course (1 km, 5 km, 10 km, semi, marathon), recalculables depuis le FIT.
+CREATE TABLE IF NOT EXISTS best_efforts (
+    user_id     INTEGER NOT NULL,
+    activity_id TEXT NOT NULL,
+    distance_m  REAL NOT NULL,
+    duration_s  REAL NOT NULL,
+    avg_hr      INTEGER,
+    PRIMARY KEY (user_id, activity_id, distance_m),
+    FOREIGN KEY (user_id, activity_id) REFERENCES activities (user_id, id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS plans (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,6 +112,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "hidden" not in columns:
         # v4 : activités masquées. Hors de ACTIVITY_COLUMNS : un réimport ne les fait pas réapparaître.
         conn.execute("ALTER TABLE activities ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    if "efforts_version" not in columns:
+        # v5 : meilleurs efforts (table best_efforts, créée par SCHEMA), calculés en tâche de fond.
+        conn.execute("ALTER TABLE activities ADD COLUMN efforts_version INTEGER")
         conn.commit()
 
 

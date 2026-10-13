@@ -51,8 +51,12 @@ def _value(frame, *names):
 @lru_cache(maxsize=16)
 def parse_streams(location: str) -> dict:
     """Points `record`, longueurs de bassin et, par session, sa fenêtre horaire et la longueur du bassin."""
+    return parse_fit_streams(read_location(location))
+
+
+def parse_fit_streams(data: bytes) -> dict:
     records, lengths, sessions = [], [], []
-    with fitdecode.FitReader(io.BytesIO(read_location(location)), check_crc=fitdecode.CrcCheck.DISABLED) as fit:
+    with fitdecode.FitReader(io.BytesIO(data), check_crc=fitdecode.CrcCheck.DISABLED) as fit:
         for frame in fit:
             if frame.frame_type != fitdecode.FIT_FRAME_DATA:
                 continue
