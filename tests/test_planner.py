@@ -52,3 +52,31 @@ def test_validate_detects_jump():
     plan = build_plan(Goal(21.1, 6300, date(2027, 1, 31), 4), 25.0, START)
     plan.weeks[2].volume_km = 80
     assert any("dépasse" in e for e in validate_plan(plan))
+
+
+def test_narrate_week_logs_prompt_and_answer(monkeypatch, caplog):
+    import logging
+
+    from coach import llm
+
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": " **Séance** facile. "}}]}
+
+    def fake_post(url, json, timeout):
+        sent.update(json)
+        return Response()
+
+    monkeypatch.setattr(llm.httpx, "post", fake_post)
+    week = {"index": 0, "phase": "base", "deload": False, "volume_km": 10, "sessions": []}
+    with caplog.at_level(logging.INFO, logger="coach.llm"):
+        assert llm.narrate_week(week, "http://llm", "m", 5) == "**Séance** facile."
+    logged = caplog.text
+    assert llm.SYSTEM_PROMPT in logged
+    assert sent["messages"][1]["content"] in logged
+    assert "réponse" in logged and "**Séance** facile." in logged

@@ -109,6 +109,22 @@ export function duration(seconds: number): string {
   return h > 0 ? `${h}h${String(m).padStart(2, "0")}` : `${m}:${String(rest).padStart(2, "0")}`;
 }
 
+/** Temps de course avec les secondes : 23:34, 1:48:24. */
+export function raceTime(seconds: number): string {
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(h > 0 ? 2 : 1, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export const RACE_LABELS: Record<number, string> = {
+  5000: "5 km",
+  10000: "10 km",
+  21097.5: "Semi",
+  42195: "Marathon",
+};
+
 export function km(value: number): string {
   return `${value.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km`;
 }

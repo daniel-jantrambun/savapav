@@ -202,6 +202,43 @@ export type Stats = {
   >;
 };
 
+export type EffortRef = { activity_id: string; date: string; distance_m: number; duration_s: number };
+export type RacePrediction = { distance_m: number; time_s: number; source: EffortRef };
+export type ScanProgress = { total: number; done: number; running: boolean; error: string | null };
+export type Performance =
+  | { status: "scanning"; scan: ScanProgress }
+  | {
+      status: "ready";
+      scan_error: string | null;
+      method: "baseline" | "xgboost";
+      xgboost_available: boolean;
+      // Erreurs moyennes relatives (0,03 = 3 %) mesurées sur des efforts « à fond » non vus.
+      evaluation: {
+        targets: number;
+        tested: number;
+        baseline_error: number | null;
+        xgboost_error: number | null;
+      };
+      error: number | null;
+      predictions: RacePrediction[];
+      curve: { day: string; time_s: number | null }[];
+      records: {
+        distance_m: number;
+        all_time: Omit<EffortRef, "distance_m"> | null;
+        last_year: Omit<EffortRef, "distance_m"> | null;
+      }[];
+    };
+export type GoalCheck =
+  | { verdict: null; scanning?: boolean }
+  | {
+      verdict: "ambitious" | "realistic" | "conservative";
+      predicted_s: number;
+      reachable_s: number;
+      gain: number;
+      error: number | null;
+      source: EffortRef;
+    };
+
 export type LoadPoint = { day: string; load: number; ctl: number; atl: number; tsb: number };
 
 export type SyncProgress = {
@@ -322,6 +359,13 @@ export const api = {
   },
   deleteActivities: () => request<{ deleted: number }>("DELETE", "/activities"),
   importStatus: () => request<ImportProgress>("GET", "/activities/import"),
+  performance: () => request<Performance>("GET", "/performance"),
+  rescanPerformance: () => request<Performance>("POST", "/performance/rescan"),
+  checkGoal: (distanceKm: number, targetTimeS: number, raceDate: string) =>
+    request<GoalCheck>(
+      "GET",
+      `/performance/goal?distance_km=${distanceKm}&target_time_s=${targetTimeS}&race_date=${raceDate}`,
+    ),
   load: (days = 120) => request<LoadPoint[]>("GET", `/load?days=${days}`),
 
   plans: () => request<PlanSummary[]>("GET", "/plans"),

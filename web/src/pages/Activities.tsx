@@ -9,6 +9,7 @@ import {
   type SyncProgress,
 } from "../api";
 import { LoadChart } from "../LoadChart";
+import { PerformanceCard } from "../Performance";
 import {
   Alert,
   Button,
@@ -211,6 +212,8 @@ export function ActivitiesPage() {
           </div>
         )}
       </Card>
+
+      <PerformanceCard />
 
       <Card title="Ajouter des activités">
         <div className="flex flex-wrap gap-2">
