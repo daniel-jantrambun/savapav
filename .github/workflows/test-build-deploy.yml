@@ -20,8 +20,6 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/savapav
   NAS_PLATFORM: linux/amd64
   NAS_DIR: /volume1/docker/savapav
-  # Transit des fichiers envoyés au NAS (le préfixe @ le masque dans File Station).
-  STAGE: /volume1/@savapav-incoming
 
 jobs:
   test:
@@ -109,15 +107,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Le Synology n'accède pas à ghcr.io (son VPN client bloque le TLS) : on exporte ici l'image,
-      # avant WireGuard qui coupe l'accès DNS/Internet du runner.
-      - name: Export image for the NAS
-        run: |
-          TAG="sha-${GITHUB_SHA::7}"
-          docker pull --platform "$NAS_PLATFORM" "$IMAGE:$TAG"
-          docker save --platform "$NAS_PLATFORM" "$IMAGE:$TAG" | gzip > coach-image.tar.gz
-          ls -lh coach-image.tar.gz
-
       - name: Connect WireGuard
         timeout-minutes: 3
         run: |
@@ -163,7 +152,7 @@ jobs:
             if [ -n \"\$port\" ]; then set_var SAVAPAV_PORT \"\$port\"; fi
             chmod 600 $NAS_DIR/.env'"
 
-      # Transfère l'image et le compose.yaml du dépôt, puis docker load + compose up -d.
+      # Copie le compose.yaml du dépôt, puis le NAS tire lui-même l'image :latest de ghcr.io et relance l'app.
       # data/ reste sur le NAS et ne transite jamais par la CI.
       # Le mot de passe est envoyé sur stdin pour sudo -S : il n'apparaît pas dans la ligne de commande distante.
       - name: Deploy on Synology
@@ -171,36 +160,42 @@ jobs:
         env:
           SSHPASS: ${{ secrets.SYNOLOGY_USER_PWD }}
           TARGET: ${{ vars.SYNOLOGY_USER_LOGIN }}@${{ vars.SYNOLOGY_PRIVATE_IP }}
-          NAS_USER: ${{ vars.SYNOLOGY_USER_LOGIN }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="sha-${GITHUB_SHA::7}"
           nas() { sshpass -e ssh -p 22822 -o StrictHostKeyChecking=no "$TARGET" "$@"; }
+          docker_nas() { echo "$SSHPASS" | nas "sudo -S -p '' /usr/local/bin/docker $*"; }
 
-          # Garde-fou : l'image exportée doit correspondre à l'architecture du NAS.
+          # Garde-fou : l'image est construite pour l'architecture du NAS.
           [ "$(nas uname -m)" = x86_64 ] || { echo "Le NAS n'est plus en x86_64 : adapter NAS_PLATFORM" >&2; exit 1; }
 
-          # /tmp est sur la partition système de DSM (~2 Go) : on transite par un dossier du volume, hors des
-          # dossiers partagés (leurs ACL Synology empêchent ci-github d'y écrire, même après chown).
-          echo "$SSHPASS" | nas "sudo -S -p '' sh -euc 'mkdir -p $STAGE && chown $NAS_USER $STAGE && chmod 700 $STAGE'"
-          nas "test -w $STAGE" || { echo "$NAS_USER ne peut pas écrire dans $STAGE" >&2; exit 1; }
-          REMOTE_TAR=$STAGE/coach-image.tar.gz
-          REMOTE_COMPOSE=$STAGE/compose.yaml
+          { echo "$SSHPASS"; cat compose.yaml; } | nas "sudo -S -p '' sh -euc '
+            [ -f $NAS_DIR/.env ] || { echo \"$NAS_DIR/.env manquant (voir README, installation du NAS)\" >&2; exit 1; }
+            cat > $NAS_DIR/compose.yaml'"
 
-          nas "cat > $REMOTE_TAR" < coach-image.tar.gz
-          nas "cat > $REMOTE_COMPOSE" < compose.yaml
+          # Le paquet ghcr.io peut être privé : connexion avec le jeton du job (lecture des paquets, expiré à la fin
+          # du job), envoyé sur stdin, et déconnexion dès le pull fini pour ne pas le laisser dans /root/.docker.
+          printf '%s\n%s\n' "$SSHPASS" "$GHCR_TOKEN" | nas "sudo -S -p '' sh -euc '
+            IFS= read -r token
+            trap \"/usr/local/bin/docker logout ghcr.io >/dev/null\" EXIT
+            printf \"%s\n\" \"\$token\" | /usr/local/bin/docker login ghcr.io -u $GHCR_USER --password-stdin
+            /usr/local/bin/docker pull --platform $NAS_PLATFORM $IMAGE:latest'"
+
+          # latest n'est poussé que depuis main : refuser de déployer une autre image que celle de ce commit
+          # (tag v*, lancement manuel depuis une branche, ou build plus récent entre-temps).
+          REVISION=$(docker_nas "image inspect -f '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' $IMAGE:latest")
+          [ "$REVISION" = "$GITHUB_SHA" ] || {
+            echo "::error::$IMAGE:latest vient du commit $REVISION, pas de $GITHUB_SHA (latest n'est poussé que depuis main)"
+            exit 1
+          }
 
           echo "$SSHPASS" | nas "sudo -S -p '' sh -euc '
-            [ -f $NAS_DIR/.env ] || { echo \"$NAS_DIR/.env manquant (voir README, installation du NAS)\" >&2; exit 1; }
-            /usr/local/bin/docker load -i $REMOTE_TAR
-            rm -f $REMOTE_TAR
-            # Seule l image de l app est épinglée sur ce commit ; celle d Ollama reste inchangée.
-            sed \"s#^\\( *image: ghcr.io/[^/]*/savapav\\):.*#\\1:$TAG#\" $REMOTE_COMPOSE > $NAS_DIR/compose.yaml
-            rm -f $REMOTE_COMPOSE
-            grep image: $NAS_DIR/compose.yaml
             cd $NAS_DIR
             # Docker sur DSM ne crée pas les dossiers des bind mounts.
             mkdir -p data ollama
-            /usr/local/bin/docker compose up -d --remove-orphans'"
+            /usr/local/bin/docker compose up -d --remove-orphans
+            # Les anciennes versions de l image, détachées de latest par le pull.
+            /usr/local/bin/docker image prune -f'"
 
       # Déclare le projet dans Container Manager s'il n'y est pas, sur $NAS_DIR et son compose.yaml : les
       # conteneurs lancés par la CI (projet compose du même nom) y apparaissent alors comme un projet géré.

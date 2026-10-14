@@ -1,0 +1,40 @@
+# Déploiement sur le DS720+ (Container Manager) : /volume1/docker/savapav/compose.yaml
+# Copié par la CI à chaque déploiement, avec l'image de l'app épinglée sur le commit.
+services:
+  app:
+    container_name: savapav-web
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      # docker exec savapav-llm ollama pull qwen2.5:3b
+    # Le NAS n'accède pas aux registres : l'image est chargée par la CI (docker load).
+    pull_policy: never
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      COACH_LLM_BASE_URL: http://llm:11434
+    volumes:
+      - ./data:/data
+    # Port du NAS configurable (SAVAPAV_PORT dans le .env), 8000 par défaut. Un portail Web Station par port
+    # écoute sur un autre port (8001 par exemple) et relaie vers celui-ci.
+    ports:
+      - "${SAVAPAV_PORT:-8000}:8000"
+    depends_on:
+      - llm
+
+  # LLM 3B local. Le modèle est déchargé de la RAM après 5 min d'inactivité.
+  # Image et modèle installés par le workflow manuel « Install Ollama on Synology ».
+  llm:
+    container_name: savapav-llm
+    image: ollama/ollama:0.40.1
+    # pull_policy: never
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - ./ollama:/root/.ollama
+    mem_limit: 3g
+    # Priorité CPU basse (1024 par défaut) : pendant une rédaction, DSM et les autres conteneurs passent avant.
+    # (pas de `cpus:` : les noyaux Synology ne gèrent souvent pas les quotas CFS)
+    cpu_shares: 256

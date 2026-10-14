@@ -117,15 +117,17 @@ npm run lint && npm run build
 ## Déploiement sur le NAS
 
 Deux conteneurs ([compose.yaml](compose.yaml)) : `app` (FastAPI + front, SQLite dans `./data`) et `llm` (Ollama,
-3 Go de RAM max). Le NAS n'accède pas aux registres Docker : c'est la CI qui télécharge et transfère les images
-via WireGuard, comme pour `cv-bd`.
+3 Go de RAM max). La CI pilote le NAS en SSH via WireGuard : le NAS tire l'image de l'app sur ghcr.io, l'image
+et le modèle Ollama lui sont encore transférés par le workflow d'installation.
 
 ### Workflows GitHub Actions
 
 - **Test, build Docker image and deploy it on Synology** (à chaque push) : tests Python + lint/build du front, puis
-  sur `main` : image `ghcr.io/daniel-jantrambun/savapav`, transfert au NAS, `docker load`, copie du
-  `compose.yaml` (image épinglée sur le commit), `docker compose up -d`, déclaration du projet `savapav` dans Container Manager s'il
-  n'existe pas (non bloquant), vérification de `/api/health`.
+  sur `main` : image `ghcr.io/daniel-jantrambun/savapav:latest`, copie du `compose.yaml`, `docker pull` de
+  `latest` par le NAS (connexion à ghcr.io avec le jeton du job, déconnexion juste après), vérification que l'image
+  tirée est bien celle du commit (sinon arrêt : `latest` n'est poussé que depuis `main`), `docker compose up -d`,
+  nettoyage des anciennes images, déclaration du projet `savapav` dans Container Manager s'il n'existe pas (non
+  bloquant), vérification de `/api/health`.
   Le déploiement est ignoré tant que la variable `SYNOLOGY_PRIVATE_IP` n'est pas configurée.
 - **Install Ollama on Synology** (manuel) : télécharge l'image Ollama et le modèle sur le runner, les installe sur
   le NAS. À lancer avant le premier déploiement, puis pour changer de version ou de modèle.
