@@ -117,8 +117,8 @@ npm run lint && npm run build
 ## Déploiement sur le NAS
 
 Deux conteneurs ([compose.yaml](compose.yaml)) : `app` (FastAPI + front, SQLite dans `./data`) et `llm` (Ollama,
-3 Go de RAM max). La CI pilote le NAS en SSH via WireGuard : le NAS tire l'image de l'app sur ghcr.io, l'image
-et le modèle Ollama lui sont encore transférés par le workflow d'installation.
+3 Go de RAM max). La CI pilote le NAS en SSH via WireGuard : le NAS tire lui-même les images (app sur ghcr.io,
+Ollama sur Docker Hub) et le modèle.
 
 ### Workflows GitHub Actions
 
@@ -129,8 +129,10 @@ et le modèle Ollama lui sont encore transférés par le workflow d'installation
   nettoyage des anciennes images, déclaration du projet `savapav` dans Container Manager s'il n'existe pas (non
   bloquant), vérification de `/api/health`.
   Le déploiement est ignoré tant que la variable `SYNOLOGY_PRIVATE_IP` n'est pas configurée.
-- **Install Ollama on Synology** (manuel) : télécharge l'image Ollama et le modèle sur le runner, les installe sur
-  le NAS. À lancer avant le premier déploiement, puis pour changer de version ou de modèle.
+- **Install Ollama on Synology** (manuel) : le NAS tire l'image Ollama (version du `compose.yaml`) et télécharge
+  le modèle (`ollama pull`, modèle choisi au lancement) dans `ollama/`, via un conteneur temporaire ; le service
+  `llm` est relancé s'il est déjà déployé. À lancer avant le premier déploiement, puis pour changer de version ou
+  de modèle.
 
 Secrets et variables du dépôt (Settings → Secrets and variables → Actions), les mêmes que pour `cv-bd` :
 

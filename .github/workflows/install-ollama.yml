@@ -1,7 +1,7 @@
 name: Install Ollama on Synology
 
 # À lancer à la main : au premier déploiement, puis pour changer de version d'Ollama ou de modèle.
-# Le NAS n'accède pas aux registres : le runner télécharge l'image et le modèle, puis les transfère.
+# La CI pilote le NAS en SSH via WireGuard ; le NAS tire lui-même l'image (Docker Hub) et le modèle (ollama pull).
 on:
     workflow_dispatch:
         inputs:
@@ -18,35 +18,15 @@ permissions:
 env:
     NAS_PLATFORM: linux/amd64
     NAS_DIR: /volume1/docker/savapav
-    # Transit des fichiers envoyés au NAS (le préfixe @ le masque dans File Station).
-    STAGE: /volume1/@savapav-incoming
 
 jobs:
     install:
         runs-on: ubuntu-latest
-        # ~5,7 Go à transférer par WireGuard puis `docker load` sur le J4125 : c'est long, mais pas illimité.
-        timeout-minutes: 20
+        # Image (~4 Go) et modèle (~2 Go) téléchargés par le NAS : c'est long, mais pas illimité.
+        timeout-minutes: 45
         concurrency: deploy-nas
         steps:
             - uses: actions/checkout@v4
-
-            # La version d'Ollama vient du compose.yaml : une seule source de vérité.
-            # - name: Download Ollama image and model
-            #   timeout-minutes: 20
-            #   run: |
-            #       OLLAMA_IMAGE=$(grep -o 'ollama/ollama:[^ "]*' compose.yaml)
-            #       echo "OLLAMA_IMAGE=$OLLAMA_IMAGE" >> "$GITHUB_ENV"
-            #       docker pull --platform "$NAS_PLATFORM" "$OLLAMA_IMAGE"
-            #       docker save --platform "$NAS_PLATFORM" "$OLLAMA_IMAGE" | gzip > ollama-image.tar.gz
-
-            #       mkdir ollama-data
-            #       docker run -d --name ollama -v "$PWD/ollama-data:/root/.ollama" "$OLLAMA_IMAGE"
-            #       sleep 5
-            #       docker exec ollama ollama pull "${{ inputs.model }}"
-            #       docker rm -f ollama
-            #       # Les poids GGUF sont déjà compressés : un tar simple suffit.
-            #       sudo tar -C ollama-data -cf ollama-models.tar models
-            #       ls -lh ollama-image.tar.gz ollama-models.tar
 
             - name: Connect WireGuard
               timeout-minutes: 3
@@ -56,39 +36,47 @@ jobs:
                   sudo chmod 600 /etc/wireguard/wg0.conf
                   sudo wg-quick up wg0
 
+            # Le modèle est téléchargé par un conteneur Ollama temporaire, monté sur le même dossier que le service
+            # llm : ça marche avant le premier déploiement (pas encore de compose.yaml ni de .env sur le NAS), et
+            # avec la version d'Ollama du compose.yaml du dépôt. Les modèles déjà présents sont conservés.
             - name: Install on Synology
-              timeout-minutes: 60
+              timeout-minutes: 40
               env:
                   SSHPASS: ${{ secrets.SYNOLOGY_USER_PWD }}
                   TARGET:
                       ${{ vars.SYNOLOGY_USER_LOGIN }}@${{
                       vars.SYNOLOGY_PRIVATE_IP }}
-                  NAS_USER: ${{ vars.SYNOLOGY_USER_LOGIN }}
+                  MODEL: ${{ inputs.model }}
               run: |
                   nas() { sshpass -e ssh -p 22822 -o StrictHostKeyChecking=no "$TARGET" "$@"; }
                   [ "$(nas uname -m)" = x86_64 ] || { echo "Le NAS n'est plus en x86_64 : adapter NAS_PLATFORM" >&2; exit 1; }
+                  # Le nom du modèle part dans une commande distante : on n'accepte que des caractères sûrs.
+                  [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "Nom de modèle invalide : $MODEL" >&2; exit 1; }
 
-                  echo "Transfert de l'image et du modèle Ollama vers le NAS ($TARGET)..."
-                  # /tmp est sur la partition système de DSM (~2 Go) : on transite par un dossier du volume, hors des
-                  # dossiers partagés (leurs ACL Synology empêchent ci-github d'y écrire, même après chown).
-                  echo "$SSHPASS" | nas "sudo -S -p '' sh -euc 'mkdir -p $STAGE && chown $NAS_USER $STAGE && chmod 700 $STAGE'"
-                  nas "test -w $STAGE" || { echo "$NAS_USER ne peut pas écrire dans $STAGE" >&2; exit 1; }
-                  nas "cat > $STAGE/ollama-image.tar.gz" < ollama-image.tar.gz
-                  nas "cat > $STAGE/ollama-models.tar" < ollama-models.tar
-                  echo "Transfert terminé : $(nas ls -lh $STAGE/ollama-image.tar.gz $STAGE/ollama-models.tar)"
+                  # La version d'Ollama vient du compose.yaml : une seule source de vérité.
+                  OLLAMA_IMAGE=$(grep -o 'ollama/ollama:[^ "]*' compose.yaml)
+                  echo "Installation de $OLLAMA_IMAGE et du modèle $MODEL sur le NAS..."
 
-                  echo "Installation de l'image et du modèle Ollama sur le NAS ($TARGET)..."
-
-                  # Les modèles déjà présents sont conservés ; le nouveau s'ajoute à côté.
                   echo "$SSHPASS" | nas "sudo -S -p '' sh -euc '
-                    /usr/local/bin/docker load -i $STAGE/ollama-image.tar.gz
+                    docker=/usr/local/bin/docker
+                    \$docker pull --platform $NAS_PLATFORM $OLLAMA_IMAGE
                     mkdir -p $NAS_DIR/ollama
-                    tar -C $NAS_DIR/ollama -xf $STAGE/ollama-models.tar
-                    rm -f $STAGE/ollama-image.tar.gz $STAGE/ollama-models.tar
-                    if [ -f $NAS_DIR/compose.yaml ]; then
-                      cd $NAS_DIR && /usr/local/bin/docker compose up -d llm && sleep 3
-                      /usr/local/bin/docker compose exec -T llm ollama list
-                    fi'"
+                    \$docker rm -f savapav-ollama-install >/dev/null 2>&1 || true
+                    \$docker run -d --name savapav-ollama-install -v $NAS_DIR/ollama:/root/.ollama $OLLAMA_IMAGE
+                    trap \"\$docker rm -f savapav-ollama-install >/dev/null\" EXIT
+                    # Le serveur Ollama met quelques secondes à démarrer.
+                    for _ in \$(seq 1 30); do
+                      \$docker exec savapav-ollama-install ollama list >/dev/null 2>&1 && break
+                      sleep 1
+                    done
+                    \$docker exec savapav-ollama-install ollama pull $MODEL
+                    \$docker exec savapav-ollama-install ollama list
+                    # Service llm déjà déployé : on le relance pour qu il prenne la nouvelle image.
+                    if [ -f $NAS_DIR/compose.yaml ] && [ -f $NAS_DIR/.env ]; then
+                      cd $NAS_DIR && \$docker compose up -d llm
+                    fi
+                    # Les anciennes versions de l image Ollama.
+                    \$docker image prune -f'"
 
             - name: Disconnect
               if: always()
