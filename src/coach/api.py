@@ -1,3 +1,4 @@
+import logging
 import shutil
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -81,6 +82,8 @@ def create_app(settings: Settings) -> FastAPI:
     full_syncs: dict[int, garmin.SyncProgress] = {}
     file_imports: dict[int, ImportProgress] = {}
     effort_scans: dict[int, efforts.ScanProgress] = {}
+    logger = logging.getLogger("coach")
+    logger.info("Savapav démarré, version %s", settings.version)
 
     def db():
         # SQLite : une connexion par requête, simple et suffisant pour une famille.
@@ -157,6 +160,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @api.get("/me")
     def me(user: User):
+        logger.info("Utilisateur %s (%s) a accédé à /me", user["username"], user["id"])
         return public_user(user)
 
     @api.patch("/me")
