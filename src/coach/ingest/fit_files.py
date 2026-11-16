@@ -13,6 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import fitdecode
+from opentelemetry import trace
+
+from coach.telemetry import tracer
 
 COMMIT_EVERY = 100  # fichiers : un gros export ne verrouille pas la base pendant tout l'import
 
@@ -106,6 +109,7 @@ def iter_fit_payloads(root: Path, skip: frozenset[str] = frozenset()) -> Iterato
                 yield from _iter_zip(archive, str(path))
 
 
+@tracer.start_as_current_span("fit.import")
 def import_directory(conn, user_id: int, root: Path, only_new: bool = False,
                      progress: ImportProgress | None = None) -> tuple[int, int]:
     """Importe tous les FIT d'un dossier pour un utilisateur. Renvoie (importés, ignorés).
@@ -149,4 +153,6 @@ def import_directory(conn, user_id: int, root: Path, only_new: bool = False,
             imported += 1
         progress.imported = imported
     conn.commit()
+    trace.get_current_span().set_attributes({"user.id": user_id, "fit.only_new": only_new, "fit.files": progress.files,
+                                             "activities.imported": imported, "activities.skipped": skipped})
     return imported, skipped

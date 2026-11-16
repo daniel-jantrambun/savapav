@@ -192,6 +192,32 @@ cd /volume1/docker/savapav && /usr/local/bin/docker compose exec -T app coach sy
 
 Sauvegarder `data/coach.sqlite` (Hyper Backup) et `COACH_SECRET_KEY` séparément.
 
+### Observabilité
+
+L'app envoie ses traces et ses logs en OpenTelemetry (OTLP/HTTP) au Collector du projet Container Manager
+`monitoring` ([synology-monitoring](https://github.com/daniel-jantrambun/synology-monitoring)), qui les écrit dans
+Tempo et Loki, affichés par Grafana. Le service `app` est branché sur le réseau Docker externe `monitoring`
+(`OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`, dans [compose.yaml](compose.yaml)). Le déploiement crée
+ce réseau s'il manque. Si le Collector est arrêté, l'app fonctionne normalement et perd seulement la télémétrie.
+
+- **Traces** (`service.name=savapav`, `project=savapav`) : une par requête API (`/api/health` exclu), avec les
+  tâches de fond dans la même trace que la requête qui les lance. Spans métier : `plan.narrate` et `llm.week`
+  (modèle, semaine, jetons du prompt et de la réponse, durée), `garmin.sync` (activités trouvées, téléchargées,
+  importées), `fit.import`, `efforts.scan`, `performance.train` (XGBoost). Appels sortants : Ollama (httpx) et
+  Garmin Connect (requests). La CLI (`coach sync-garmin --all` de la tâche nocturne) est tracée aussi.
+- **Métriques** : rien à faire dans l'app. Tempo tire des traces le débit, les erreurs et la latence par span
+  (`traces_spanmetrics_*{service="savapav"}` dans Prometheus).
+- **Logs** : les logs Python partent en OTLP avec le `trace_id` du span en cours (lien log → trace dans Grafana).
+  Les deux conteneurs écrivent aussi en `json-file`, lu par le Collector : logs d'uvicorn et d'Ollama compris.
+  Les logs Python y sont donc en double : filtrer sur `service_name="savapav"` pour ne garder que la version OTLP.
+
+Dans Grafana, **Explore** :
+- Tempo : `{resource.service.name="savapav"}` (ou `{name="llm.week"}` pour les rédactions) ;
+- Loki : `{service_name="savapav"}`.
+
+Pour couper la télémétrie : `OTEL_EXPORTER_OTLP_ENDPOINT=` (valeur vide) dans `/volume1/docker/savapav/.env`, puis
+redémarrer le projet. Sans cette variable (dev local, tests, `compose-local.yaml`), rien n'est envoyé.
+
 ## Configuration
 
 Voir [.env.example](.env.example) : clé de chiffrement des jetons Garmin, cookie sécurisé, modèle LLM.

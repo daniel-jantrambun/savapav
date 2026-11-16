@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, FastAPI, HTTPEx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from coach import auth, efforts, service
+from coach import auth, efforts, service, telemetry
 from coach.config import Settings, load_settings
 from coach.db import connect
 from coach.ingest import garmin
@@ -72,6 +72,7 @@ class BlockIn(BaseModel):
 
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Savapav", docs_url="/api/docs", openapi_url="/api/openapi.json")
+    telemetry.setup(app)
     api = APIRouter(prefix="/api")
     # Plans en cours de rédaction par le LLM (tâches de fond du process), pour que l'interface puisse l'afficher.
     narrating: set[int] = set()
