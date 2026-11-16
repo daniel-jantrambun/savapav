@@ -83,7 +83,16 @@ def create_app(settings: Settings) -> FastAPI:
     file_imports: dict[int, ImportProgress] = {}
     effort_scans: dict[int, efforts.ScanProgress] = {}
     logger = logging.getLogger("coach")
-    logger.info("Savapav démarré, version %s", settings.version)
+    logger.info("Savapav démarré avec %s", {
+        "data_dir": str(settings.data_dir),
+        "db_path": str(settings.db_path),
+        "fit_dir": str(settings.fit_dir),
+        "web_dir": str(settings.web_dir),
+        "cookie_secure": settings.cookie_secure,
+        "llm_base_url": settings.llm_base_url,
+        "llm_model": settings.llm_model,
+        "llm_timeout_s": settings.llm_timeout_s,
+    })
 
     def db():
         # SQLite : une connexion par requête, simple et suffisant pour une famille.
