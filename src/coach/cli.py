@@ -5,7 +5,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from coach import auth, efforts, service
+from coach import auth, efforts, service, telemetry
 from coach.config import load_settings
 from coach.db import connect
 from coach.multisport import AXES, Preferences
@@ -89,6 +89,8 @@ def main() -> None:
     p.add_argument("--week", type=int, action="append", help="index de semaine (0 = première)")
 
     args = parser.parse_args()
+    # Lancée par `docker compose exec app` (synchro nocturne), la CLI a l'environnement OTEL_* du conteneur.
+    telemetry.configure()
     settings = load_settings()
     conn = connect(settings.db_path)
 

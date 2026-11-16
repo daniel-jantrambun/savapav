@@ -5,6 +5,8 @@ import logging
 from dataclasses import asdict
 from datetime import date, timedelta
 
+from opentelemetry import trace
+
 from coach import efforts, performance
 from coach.activity import detail as fit_detail
 from coach.config import Settings
@@ -13,6 +15,7 @@ from coach.load import daily_loads, fitness_series, recent_weekly_km
 from coach.multisport import Preferences, build_block, validate_block
 from coach.planner import Goal, build_plan, validate_plan
 from coach.sports import analyze, category, category_stats, stats_start, weeks_since
+from coach.telemetry import tracer
 
 logging.basicConfig(level=logging.INFO)
 
@@ -241,8 +244,11 @@ def get_plan(conn, user_id: int, plan_id: int) -> dict | None:
     return {"id": row["id"], "created_at": row["created_at"], **plan}
 
 
+@tracer.start_as_current_span("plan.narrate")
 def narrate_plan(conn, settings: Settings, user_id: int, plan_id: int, weeks: list[int] | None = None) -> int:
     """Fait rédiger les semaines demandées (toutes par défaut). Renvoie le nombre de semaines rédigées."""
+    span = trace.get_current_span()
+    span.set_attributes({"user.id": user_id, "plan.id": plan_id})
     plan = get_plan(conn, user_id, plan_id)
     if plan is None:
         raise KeyError(plan_id)
@@ -258,6 +264,7 @@ def narrate_plan(conn, settings: Settings, user_id: int, plan_id: int, weeks: li
         )
         conn.commit()
         done += 1
+    span.set_attribute("plan.weeks_narrated", done)
     return done
 
 
@@ -279,8 +286,11 @@ def predictor(conn, user: dict, today: date) -> performance.Predictor:
     key = _performance_key(conn, user, today)
     cached = _predictors.get(user["id"])
     if cached is None or cached[0] != key:
-        model = performance.Predictor(activities(conn, user["id"], hidden=False), efforts.efforts(conn, user["id"]),
-                                      user["hr_rest"], user["hr_max"], today)
+        # Entraînement XGBoost : seulement quand les données changent, mais plusieurs secondes sur le NAS.
+        with tracer.start_as_current_span("performance.train", attributes={"user.id": user["id"]}) as span:
+            model = performance.Predictor(activities(conn, user["id"], hidden=False),
+                                          efforts.efforts(conn, user["id"]), user["hr_rest"], user["hr_max"], today)
+            span.set_attribute("performance.method", str(model.method))
         cached = _predictors[user["id"]] = (key, model)
     return cached[1]
 

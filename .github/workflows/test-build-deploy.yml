@@ -193,6 +193,9 @@ jobs:
             cd $NAS_DIR
             # Docker sur DSM ne crée pas les dossiers des bind mounts.
             mkdir -p data ollama
+            # Réseau externe du projet monitoring (otel-collector) : créé ici aussi, sinon savapav ne démarre pas
+            # tant que le monitoring n a jamais été déployé.
+            /usr/local/bin/docker network inspect monitoring >/dev/null 2>&1 || /usr/local/bin/docker network create monitoring
             /usr/local/bin/docker compose up -d --remove-orphans
             # Les anciennes versions de l image, détachées de latest par le pull.
             /usr/local/bin/docker image prune -f'"

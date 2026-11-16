@@ -11,9 +11,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 
 import fitdecode
+from opentelemetry import trace
 
 from coach.activity import FitUnavailable, _session_window, parse_fit_streams, read_location
 from coach.sports import RUN, category
+from coach.telemetry import tracer
 
 # Pas de 1 km : trop court pour être fiable (une descente suffit), et Riegel en extrapole des temps trop rapides.
 EFFORT_DISTANCES_M = (5000.0, 10000.0, 21097.5, 42195.0)
@@ -170,8 +172,10 @@ def reset(conn, user_id: int) -> None:
     conn.commit()
 
 
+@tracer.start_as_current_span("efforts.scan")
 def scan_pending(conn, user_id: int, progress: ScanProgress | None = None) -> int:
     todo = pending(conn, user_id)
+    trace.get_current_span().set_attributes({"user.id": user_id, "efforts.activities": len(todo)})
     progress = progress or ScanProgress()
     progress.total = len(todo)
     read = archive_reader()

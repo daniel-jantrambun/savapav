@@ -11,6 +11,8 @@ import time
 
 import httpx
 
+from coach.telemetry import tracer
+
 log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
@@ -101,16 +103,24 @@ def narrate_week(week: dict, base_url: str, model: str, timeout_s: float, multis
     log.info("LLM %s, semaine %s — prompt système : %s", model, week["index"] + 1, system)
     log.info("LLM %s, semaine %s — prompt utilisateur : %s", model, week["index"] + 1, user)
     started = time.monotonic()
-    response = httpx.post(
-        f"{base_url.rstrip('/')}/v1/chat/completions",
-        json={
-            "model": model,
-            "temperature": 0.3,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        },
-        timeout=timeout_s,
-    )
-    response.raise_for_status()
-    text = response.json()["choices"][0]["message"]["content"].strip()
+    with tracer.start_as_current_span("llm.week") as span:
+        span.set_attributes({"llm.model": model, "plan.week": week["index"] + 1, "plan.multisport": multisport,
+                             "llm.prompt_chars": len(system) + len(user)})
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/v1/chat/completions",
+            json={
+                "model": model,
+                "temperature": 0.3,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            },
+            timeout=timeout_s,
+        )
+        response.raise_for_status()
+        body = response.json()
+        text = body["choices"][0]["message"]["content"].strip()
+        # Compteurs de jetons renvoyés par Ollama (API compatible OpenAI) : le prompt est le goulot sur le J4125.
+        usage = body.get("usage") or {}
+        span.set_attributes({"llm.response_chars": len(text),
+                             **{f"llm.usage.{k}": v for k, v in usage.items() if isinstance(v, int)}})
     log.info("LLM %s, semaine %s — réponse en %.0f s : %s", model, week["index"] + 1, time.monotonic() - started, text)
     return text

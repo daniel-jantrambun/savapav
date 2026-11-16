@@ -1,5 +1,14 @@
 # Déploiement sur le DS720+ (Container Manager) : /volume1/docker/savapav/compose.yaml
 # Copié par la CI à chaque déploiement, avec l'image de l'app épinglée sur le commit.
+
+# Container Manager écrit les logs avec le pilote « db », illisible par le Collector du projet monitoring :
+# json-file donne les *-json.log qu'il envoie à Loki.
+x-logging: &json-file
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
     container_name: savapav-web
@@ -10,6 +19,11 @@ services:
     env_file: .env
     environment:
       COACH_LLM_BASE_URL: http://llm:11434
+      # Traces et logs OTLP vers le Collector du projet monitoring (synology-monitoring), sur le réseau
+      # « monitoring ». OTEL_EXPORTER_OTLP_ENDPOINT vide dans le .env : télémétrie coupée.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: savapav
+      OTEL_RESOURCE_ATTRIBUTES: project=savapav
     volumes:
       - ./data:/data
     # Port du NAS configurable (SAVAPAV_PORT dans le .env), 8000 par défaut. Un portail Web Station par port
@@ -18,6 +32,9 @@ services:
       - "${SAVAPAV_PORT:-8000}:8000"
     depends_on:
       - llm
+    # Pas de depends_on vers le Collector : un autre projet, que savapav n'attend pas pour démarrer.
+    networks: [default, monitoring]
+    logging: *json-file
 
   # LLM 3B local. Le modèle est déchargé de la RAM après 5 min d'inactivité.
   # Image et modèle installés par le workflow manuel « Install Ollama on Synology ».
@@ -35,3 +52,9 @@ services:
     # Priorité CPU basse (1024 par défaut) : pendant une rédaction, DSM et les autres conteneurs passent avant.
     # (pas de `cpus:` : les noyaux Synology ne gèrent souvent pas les quotas CFS)
     cpu_shares: 256
+    logging: *json-file
+
+# Réseau du projet monitoring (créé par son déploiement) : l'app y joint otel-collector.
+networks:
+  monitoring:
+    external: true

@@ -17,8 +17,10 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from garminconnect import Garmin
 from garminconnect.exceptions import GarminConnectTooManyRequestsError
+from opentelemetry import trace
 
 from coach.ingest.fit_files import import_directory
+from coach.telemetry import tracer
 
 MFA_TTL_S = 10 * 60
 PAGE_SIZE = 100
@@ -154,10 +156,13 @@ def status(conn, user_id: int) -> dict:
     return {"connected": row is not None, **(dict(row) if row else {})}
 
 
+@tracer.start_as_current_span("garmin.sync")
 def sync(conn, user_id: int, fit_dir: Path, secret_key: str | None, limit: int = 50, full: bool = False,
          progress: SyncProgress | None = None, delay_s: float | None = None) -> tuple[int, int]:
     """Télécharge les `limit` dernières activités (ou tout l'historique si `full`) et importe les nouvelles.
     Renvoie (importées, ignorées). `progress` est mis à jour au fil de l'eau (synchro complète en tâche de fond)."""
+    span = trace.get_current_span()
+    span.set_attributes({"user.id": user_id, "garmin.full": full, "garmin.limit": limit})
     progress = progress or SyncProgress()
     row = conn.execute("SELECT tokens_encrypted FROM garmin_accounts WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
@@ -168,6 +173,8 @@ def sync(conn, user_id: int, fit_dir: Path, secret_key: str | None, limit: int =
             result = _sync(conn, user_id, fit_dir, secret_key, limit, fernet, row, full, progress,
                            (FULL_SYNC_DELAY_S if delay_s is None else delay_s) if full else 0)
             progress.finish()
+            span.set_attributes({"garmin.found": progress.found, "garmin.downloaded": progress.downloaded,
+                                 "activities.imported": result[0], "activities.skipped": result[1]})
             return result
         except GarminError as e:
             progress.finish(str(e))

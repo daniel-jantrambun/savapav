@@ -15,6 +15,13 @@ dependencies = [
     # Sous macOS, XGBoost a besoin d'OpenMP : brew install libomp (sans lui, l'app garde la méthode simple).
     "xgboost-cpu>=3.0; sys_platform == 'linux'",
     "xgboost>=3.0; sys_platform != 'linux'",
+    # Traces et logs vers le Collector du NAS (coach/telemetry.py), inactifs sans OTEL_EXPORTER_OTLP_ENDPOINT.
+    # OTLP/HTTP plutôt que gRPC : pas de grpcio (lourd) dans l'image.
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-instrumentation-requests>=0.51b0",
 ]
 
 [project.optional-dependencies]
