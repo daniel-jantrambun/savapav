@@ -33,7 +33,11 @@ function ProfileCard() {
     event.preventDefault();
     try {
       setUser(
-        await api.updateMe({ display_name: name.trim(), hr_rest: Number(hrRest), hr_max: Number(hrMax) }),
+        await api.updateMe({
+          display_name: name.trim(),
+          hr_rest: Number(hrRest),
+          hr_max: Number(hrMax),
+        }),
       );
       setMessage({ kind: "success", text: "Profil enregistré." });
     } catch (e) {
@@ -102,50 +106,51 @@ function APIKeyCard() {
 
   return (
     user.is_admin && (
-    <Card title="API Key">
-      <div className="space-y-4">
-        {user.api_key === null ? (
-          <>
-            <p className="text-sm text-ink-2">Aucune API key pour ce compte.</p>
-            <Button onClick={generate} disabled={busy}>
-              {busy ? "Génération…" : "Générer une API key"}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-end gap-2">
-              <div className="min-w-0 flex-1">
-                <Field
-                  label="API Key"
-                  type={revealed ? "text" : "password"}
-                  value={user.api_key}
-                  readOnly
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-              <Button variant="secondary" onClick={() => setRevealed((r) => !r)} aria-pressed={revealed}>
-                {revealed ? "Cacher" : "Révéler"}
+      <Card title="API Key">
+        <div className="space-y-4">
+          {user.api_key === null ? (
+            <>
+              <p className="text-sm text-ink-2">Aucune API key pour ce compte.</p>
+              <Button onClick={generate} disabled={busy}>
+                {busy ? "Génération…" : "Générer une API key"}
               </Button>
-            </div>
-            <Button variant="secondary" onClick={() => setConfirmRegenerate(true)} disabled={busy}>
-              {busy ? "Génération…" : "Générer une nouvelle clé"}
-            </Button>
-          </>
-        )}
-        {message && <Alert kind={message.kind}>{message.text}</Alert>}
-      </div>
-      <ConfirmDialog
-        open={confirmRegenerate}
-        title="Générer une nouvelle API key ?"
-        confirmLabel="Générer"
-        onConfirm={generate}
-        onCancel={() => setConfirmRegenerate(false)}
-      >
-        <p>L'ancienne clé cessera immédiatement de fonctionner.</p>
-      </ConfirmDialog>
-    </Card>)
-    );
+            </>
+          ) : (
+            <>
+              <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1">
+                  <Field
+                    label="API Key"
+                    type={revealed ? "text" : "password"}
+                    value={user.api_key}
+                    readOnly
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <Button variant="secondary" onClick={() => setRevealed((r) => !r)} aria-pressed={revealed}>
+                  {revealed ? "Cacher" : "Révéler"}
+                </Button>
+              </div>
+              <Button variant="secondary" onClick={() => setConfirmRegenerate(true)} disabled={busy}>
+                {busy ? "Génération…" : "Générer une nouvelle clé"}
+              </Button>
+            </>
+          )}
+          {message && <Alert kind={message.kind}>{message.text}</Alert>}
+        </div>
+        <ConfirmDialog
+          open={confirmRegenerate}
+          title="Générer une nouvelle API key ?"
+          confirmLabel="Générer"
+          onConfirm={generate}
+          onCancel={() => setConfirmRegenerate(false)}
+        >
+          <p>L'ancienne clé cessera immédiatement de fonctionner.</p>
+        </ConfirmDialog>
+      </Card>
+    )
+  );
 }
 
 function GarminCard() {
@@ -185,7 +190,10 @@ function GarminCard() {
         setStep("mfa");
       } else {
         await refresh();
-        setMessage({ kind: "success", text: "Compte Garmin connecté. Lancez une synchro depuis Activités." });
+        setMessage({
+          kind: "success",
+          text: "Compte Garmin connecté. Lancez une synchro depuis Activités.",
+        });
       }
     });
   };
@@ -197,7 +205,10 @@ function GarminCard() {
       setCode("");
       setStep("credentials");
       await refresh();
-      setMessage({ kind: "success", text: "Compte Garmin connecté. Lancez une synchro depuis Activités." });
+      setMessage({
+        kind: "success",
+        text: "Compte Garmin connecté. Lancez une synchro depuis Activités.",
+      });
     });
   };
 
@@ -300,7 +311,10 @@ function DataCard() {
     setMessage(null);
     try {
       const { deleted } = await api.deleteActivities();
-      setMessage({ kind: "success", text: `${deleted} activité(s) supprimée(s) de l'application.` });
+      setMessage({
+        kind: "success",
+        text: `${deleted} activité(s) supprimée(s) de l'application.`,
+      });
     } catch (e) {
       setMessage({ kind: "error", text: errorMessage(e) });
     } finally {
@@ -351,7 +365,10 @@ function PasswordCard() {
       await api.changePassword(current, next);
       setCurrent("");
       setNext("");
-      setMessage({ kind: "success", text: "Mot de passe modifié. Reconnectez-vous…" });
+      setMessage({
+        kind: "success",
+        text: "Mot de passe modifié. Reconnectez-vous…",
+      });
       // Le changement ferme toutes les sessions, celle-ci comprise : le prochain appel renvoie vers la connexion.
       setTimeout(() => api.me().catch(() => {}), 1500);
     } catch (e) {
