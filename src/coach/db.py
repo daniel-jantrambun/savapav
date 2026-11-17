@@ -1,122 +1,82 @@
 import sqlite3
+import threading
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+from yoyo import get_backend, read_migrations
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    display_name  TEXT NOT NULL,
-    hr_rest       INTEGER NOT NULL DEFAULT 50,
-    hr_max        INTEGER NOT NULL DEFAULT 185,
-    is_admin      INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+_migration_lock = threading.Lock()
+_migrated_paths: set[str] = set()
 
--- On ne stocke que le hash du jeton de session : une fuite de la base ne permet pas d'usurper une session.
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    expires_at TEXT NOT NULL
-);
 
--- Jetons Garmin Connect chiffrés (Fernet). Le mot de passe Garmin n'est jamais stocké.
-CREATE TABLE IF NOT EXISTS garmin_accounts (
-    user_id          INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
-    tokens_encrypted BLOB NOT NULL,
-    connected_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    last_sync_at     TEXT,
-    last_error       TEXT
-);
+def _apply_migrations(db_path: Path) -> None:
+    key = str(db_path.resolve())
+    with _migration_lock:
+        if key in _migrated_paths:
+            return
 
-CREATE TABLE IF NOT EXISTS activities (
-    user_id          INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    id               TEXT NOT NULL,      -- "<source>:<id source>"
-    source           TEXT NOT NULL,      -- fit | garmin
-    sport            TEXT NOT NULL,      -- running, cycling, swimming...
-    sub_sport        TEXT,               -- strength_training, indoor_cycling, treadmill...
-    start_time       TEXT NOT NULL,      -- ISO 8601 UTC
-    duration_s       REAL NOT NULL,
-    distance_m       REAL,
-    elevation_gain_m REAL,
-    avg_hr           REAL,
-    max_hr           REAL,
-    avg_power        REAL,
-    file_path        TEXT,
-    hidden           INTEGER NOT NULL DEFAULT 0,  -- masquée des listes et graphes (choix de l'utilisateur)
-    efforts_version  INTEGER,            -- meilleurs efforts calculés (coach.efforts) ; NULL : pas encore
-    PRIMARY KEY (user_id, id)
-);
-CREATE INDEX IF NOT EXISTS activities_user_start ON activities (user_id, start_time);
+        migrations = read_migrations(str(MIGRATIONS_DIR))
+        legacy_schema = False
+        existing_columns: dict[str, set[str]] = {}
+        if db_path.exists():
+            with sqlite3.connect(db_path) as check:
+                has_users = check.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+                ).fetchone()
+                has_yoyo_history = check.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_yoyo_migration'"
+                ).fetchone()
+                if has_users:
+                    existing_columns["users"] = {
+                        row[1] for row in check.execute("PRAGMA table_info(users)")
+                    }
+                has_activities = check.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activities'"
+                ).fetchone()
+                if has_activities:
+                    existing_columns["activities"] = {
+                        row[1] for row in check.execute("PRAGMA table_info(activities)")
+                    }
+                legacy_schema = bool(
+                    has_users
+                    and not has_yoyo_history
+                    and check.execute("PRAGMA user_version").fetchone()[0] >= 5
+                )
 
--- Meilleurs efforts d'une course (1 km, 5 km, 10 km, semi, marathon), recalculables depuis le FIT.
-CREATE TABLE IF NOT EXISTS best_efforts (
-    user_id     INTEGER NOT NULL,
-    activity_id TEXT NOT NULL,
-    distance_m  REAL NOT NULL,
-    duration_s  REAL NOT NULL,
-    avg_hr      INTEGER,
-    PRIMARY KEY (user_id, activity_id, distance_m),
-    FOREIGN KEY (user_id, activity_id) REFERENCES activities (user_id, id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS plans (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    goal_json  TEXT NOT NULL,
-    plan_json  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS plans_user ON plans (user_id);
-
--- Texte rédigé par le LLM, séparé des chiffres : il ne peut jamais modifier le plan.
-CREATE TABLE IF NOT EXISTS plan_texts (
-    plan_id    INTEGER NOT NULL REFERENCES plans (id) ON DELETE CASCADE,
-    week       INTEGER NOT NULL,
-    text       TEXT NOT NULL,
-    model      TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (plan_id, week)
-);
-"""
+        backend = get_backend(f"sqlite:///{db_path.resolve()}")
+        with backend.lock():
+            if legacy_schema:
+                backend.mark_migrations(migrations[:5])
+            else:
+                # Some older databases have schema changes that were committed before their
+                # migration history was recorded. Mark only changes already reflected in SQLite.
+                reflected_columns = (
+                    (1, "users", "is_admin"),
+                    (2, "activities", "sub_sport"),
+                    (3, "activities", "hidden"),
+                    (4, "activities", "efforts_version"),
+                )
+                pending = list(backend.to_apply(migrations))
+                for index, table, column in reflected_columns:
+                    if (
+                        index < len(migrations)
+                        and column in existing_columns.get(table, set())
+                        and migrations[index] in pending
+                    ):
+                        backend.mark_migrations([migrations[index]])
+            backend.apply_migrations(backend.to_apply(migrations))
+        _migrated_paths.add(key)
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    _apply_migrations(db_path)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 5000")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
-
-
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Mises à jour des bases créées par une version précédente (idempotent)."""
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
-    if "is_admin" not in columns:
-        # v2 : comptes admin. Le plus ancien compte existant devient admin, pour ne pas perdre la main.
-        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
-        conn.execute("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users)")
-        conn.commit()
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(activities)")}
-    if "sub_sport" not in columns:
-        # v3 : sous-sport, pour classer les séances (salle, home trainer...). Rempli au prochain import.
-        conn.execute("ALTER TABLE activities ADD COLUMN sub_sport TEXT")
-        conn.commit()
-    if "hidden" not in columns:
-        # v4 : activités masquées. Hors de ACTIVITY_COLUMNS : un réimport ne les fait pas réapparaître.
-        conn.execute("ALTER TABLE activities ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
-    if "efforts_version" not in columns:
-        # v5 : meilleurs efforts (table best_efforts, créée par SCHEMA), calculés en tâche de fond.
-        conn.execute("ALTER TABLE activities ADD COLUMN efforts_version INTEGER")
-        conn.commit()
 
 
 ACTIVITY_COLUMNS = (

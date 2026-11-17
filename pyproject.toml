@@ -5,6 +5,7 @@ description = "Planificateur d'entraînement personnel : données Garmin/Strava 
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "yoyo-migrations>=9.0",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "fitdecode>=0.10",
@@ -36,6 +37,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+coach = ["migrations/*.py", "migrations/*.sql"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

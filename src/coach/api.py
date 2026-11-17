@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, FastAPI, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from coach import auth, efforts, service, telemetry
@@ -104,7 +105,21 @@ def create_app(settings: Settings) -> FastAPI:
 
     Conn = Annotated[object, Depends(db)]
 
-    def current_user(conn: Conn, coach_session: Annotated[str | None, Cookie()] = None) -> dict:
+    # auto_error=False : l'en-tête est facultatif, la session par cookie reste possible.
+    # Déclaré via HTTPBearer pour que /api/docs propose le bouton « Authorize ».
+    bearer = HTTPBearer(auto_error=False, description="API key du profil : Authorization: Bearer <api_key>")
+
+    def current_user(
+        conn: Conn,
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)] = None,
+        coach_session: Annotated[str | None, Cookie()] = None,
+    ) -> dict:
+        # Une API key fournie est seule prise en compte : une clé invalide n'est pas rattrapée par le cookie.
+        if credentials is not None:
+            user = auth.user_for_api_key(conn, credentials.credentials)
+            if user is None:
+                raise HTTPException(401, "API key invalide", headers={"WWW-Authenticate": "Bearer"})
+            return user
         user = auth.user_for_session(conn, coach_session) if coach_session else None
         if user is None:
             raise HTTPException(401, "Non connecté")
@@ -121,7 +136,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     def public_user(user: dict) -> dict:
         return {**{k: user[k] for k in ("id", "username", "display_name", "hr_rest", "hr_max")},
-                "is_admin": bool(user["is_admin"])}
+                "is_admin": bool(user["is_admin"]), "api_key": user.get("api_key")}
 
     def open_session(response: Response, conn, user_id: int) -> None:
         response.set_cookie(
@@ -175,6 +190,12 @@ def create_app(settings: Settings) -> FastAPI:
     @api.patch("/me")
     def update_me(body: ProfileIn, user: User, conn: Conn):
         service.update_profile(conn, user["id"], **body.model_dump())
+        return public_user(auth.user_for_id(conn, user["id"]))
+
+    @api.patch("/me/apikey")
+    def regenerate_api_key(user: User, conn: Conn):
+        """Génère une nouvelle clé côté serveur ; l'ancienne cesse aussitôt de fonctionner."""
+        service.regenerate_api_key(conn, user["id"])
         return public_user(auth.user_for_id(conn, user["id"]))
 
     @api.post("/me/password", status_code=204)

@@ -7,6 +7,7 @@ export type User = {
   hr_rest: number;
   hr_max: number;
   is_admin: boolean;
+  api_key: string | null;
 };
 
 export type NewUser = { username: string; password: string; display_name?: string; is_admin?: boolean };
@@ -319,6 +320,8 @@ export const api = {
     request<User>("PATCH", "/me", fields),
   changePassword: (current_password: string, new_password: string) =>
     request<void>("POST", "/me/password", { current_password, new_password }),
+  // La clé est générée par le serveur ; l'ancienne cesse aussitôt de fonctionner.
+  regenerateApiKey: () => request<User>("PATCH", "/me/apikey"),
 
   garminStatus: () => request<GarminStatus>("GET", "/me/garmin"),
   garminConnect: (email: string, password: string) =>

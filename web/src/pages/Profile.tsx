@@ -10,6 +10,7 @@ export function ProfilePage() {
   return (
     <>
       <ProfileCard />
+      <APIKeyCard />
       <GarminCard />
       <DataCard />
       <PasswordCard />
@@ -74,6 +75,77 @@ function ProfileCard() {
       </form>
     </Card>
   );
+}
+
+function APIKeyCard() {
+  const user = useUser();
+  const { setUser } = useAuth();
+  const [revealed, setRevealed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const [message, setMessage] = useState<Message>(null);
+
+  async function generate() {
+    setConfirmRegenerate(false);
+    setBusy(true);
+    setMessage(null);
+    try {
+      setUser(await api.regenerateApiKey());
+      setRevealed(true);
+      setMessage({ kind: "success", text: "Nouvelle API key générée." });
+    } catch (e) {
+      setMessage({ kind: "error", text: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    user.is_admin && (
+    <Card title="API Key">
+      <div className="space-y-4">
+        {user.api_key === null ? (
+          <>
+            <p className="text-sm text-ink-2">Aucune API key pour ce compte.</p>
+            <Button onClick={generate} disabled={busy}>
+              {busy ? "Génération…" : "Générer une API key"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <Field
+                  label="API Key"
+                  type={revealed ? "text" : "password"}
+                  value={user.api_key}
+                  readOnly
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <Button variant="secondary" onClick={() => setRevealed((r) => !r)} aria-pressed={revealed}>
+                {revealed ? "Cacher" : "Révéler"}
+              </Button>
+            </div>
+            <Button variant="secondary" onClick={() => setConfirmRegenerate(true)} disabled={busy}>
+              {busy ? "Génération…" : "Générer une nouvelle clé"}
+            </Button>
+          </>
+        )}
+        {message && <Alert kind={message.kind}>{message.text}</Alert>}
+      </div>
+      <ConfirmDialog
+        open={confirmRegenerate}
+        title="Générer une nouvelle API key ?"
+        confirmLabel="Générer"
+        onConfirm={generate}
+        onCancel={() => setConfirmRegenerate(false)}
+      >
+        <p>L'ancienne clé cessera immédiatement de fonctionner.</p>
+      </ConfirmDialog>
+    </Card>)
+    );
 }
 
 function GarminCard() {

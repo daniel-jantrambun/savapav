@@ -2,6 +2,8 @@
 
 import json
 import logging
+import secrets
+import string
 from dataclasses import asdict
 from datetime import date, timedelta
 
@@ -169,6 +171,17 @@ def update_profile(conn, user_id: int, **fields) -> None:
         assignments = ", ".join(f"{k} = :{k}" for k in allowed)
         conn.execute(f"UPDATE users SET {assignments} WHERE id = :id", {**allowed, "id": user_id})
         conn.commit()
+
+
+API_KEY_ALPHABET = string.ascii_letters + string.digits
+API_KEY_LENGTH = 32
+
+
+def regenerate_api_key(conn, user_id: int) -> str:
+    api_key = "".join(secrets.choice(API_KEY_ALPHABET) for _ in range(API_KEY_LENGTH))
+    conn.execute("UPDATE users SET api_key = ? WHERE id = ?", (api_key, user_id))
+    conn.commit()
+    return api_key
 
 
 def create_plan(conn, user_id: int, goal: Goal, today: date) -> tuple[int, dict]:

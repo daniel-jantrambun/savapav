@@ -1,5 +1,6 @@
 import dataclasses
 import io
+import re
 import zipfile
 
 import pytest
@@ -76,6 +77,40 @@ def test_profile_update(settings, conn):
     client = client_for(settings, "alice")
     assert client.patch("/api/me", json={"hr_rest": 48, "hr_max": 190}).json()["hr_max"] == 190
     assert client.patch("/api/me", json={"hr_max": 400}).status_code == 422
+
+
+def test_api_key_update(settings, conn):
+    client = client_for(settings, "alice")
+    assert client.get("/api/me").json()["api_key"] is None
+    key = client.patch("/api/me/apikey").json()["api_key"]
+    assert re.fullmatch(r"[A-Za-z0-9]{32}", key)
+    assert client.get("/api/me").json()["api_key"] == key
+    # Une clé envoyée par le client est ignorée : le serveur génère toujours la sienne.
+    imposed = "a" * 32
+    new_key = client.patch("/api/me/apikey", json={"api_key": imposed}).json()["api_key"]
+    assert new_key not in (key, imposed)
+    assert client.get("/api/me").json()["api_key"] == new_key
+
+
+def test_api_key_authentication(settings, conn):
+    alice = client_for(settings, "alice")
+    key = alice.patch("/api/me/apikey").json()["api_key"]
+
+    # Sans cookie : la clé seule suffit, et identifie le bon compte.
+    anonymous = TestClient(create_app(settings))
+    assert anonymous.get("/api/me").status_code == 401
+    me = anonymous.get("/api/me", headers={"Authorization": f"Bearer {key}"})
+    assert me.status_code == 200 and me.json()["username"] == "alice"
+    assert anonymous.get("/api/activities", headers={"Authorization": f"Bearer {key}"}).status_code == 200
+
+    # Clé inconnue : refusée, même avec une session valide à côté.
+    bad = alice.get("/api/me", headers={"Authorization": "Bearer " + "x" * 32})
+    assert bad.status_code == 401 and bad.headers["WWW-Authenticate"] == "Bearer"
+
+    # Une nouvelle clé révoque l'ancienne.
+    new_key = alice.patch("/api/me/apikey").json()["api_key"]
+    assert anonymous.get("/api/me", headers={"Authorization": f"Bearer {key}"}).status_code == 401
+    assert anonymous.get("/api/me", headers={"Authorization": f"Bearer {new_key}"}).status_code == 200
 
 
 def test_garmin_tokens_are_encrypted_and_never_the_password(settings, conn):
@@ -413,6 +448,55 @@ def test_migration_makes_oldest_account_admin(tmp_path):
     conn = connect(db_path)
     assert [tuple(r) for r in conn.execute("SELECT username, is_admin FROM users ORDER BY id")] == [
         ("premier", 1), ("second", 0)]
+
+
+def test_migration_adopts_existing_schema_without_replaying_it(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "existing.sqlite"
+    old = sqlite3.connect(db_path)
+    old.executescript(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+        " password_hash TEXT NOT NULL, display_name TEXT NOT NULL, hr_rest INTEGER NOT NULL DEFAULT 50,"
+        " hr_max INTEGER NOT NULL DEFAULT 185, is_admin INTEGER NOT NULL DEFAULT 0,"
+        " created_at TEXT NOT NULL DEFAULT (datetime('now')));"
+        "INSERT INTO users (username, password_hash, display_name) VALUES ('existant', 'hash', 'Existant');"
+        "PRAGMA user_version = 5;"
+    )
+    old.close()
+
+    conn = connect(db_path)
+    assert conn.execute("SELECT username FROM users").fetchone()[0] == "existant"
+    assert conn.execute("SELECT COUNT(*) FROM _yoyo_migration").fetchone()[0] == 7
+    assert "api_key" in {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    conn.close()
+
+
+def test_migration_adopts_columns_already_added_before_yoyo_history(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "partially_migrated.sqlite"
+    old = sqlite3.connect(db_path)
+    old.executescript(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE,"
+        " password_hash TEXT NOT NULL, display_name TEXT NOT NULL, hr_rest INTEGER NOT NULL DEFAULT 50,"
+        " hr_max INTEGER NOT NULL DEFAULT 185, is_admin INTEGER NOT NULL DEFAULT 0,"
+        " created_at TEXT NOT NULL DEFAULT (datetime('now')));"
+        "INSERT INTO users (username, password_hash, display_name, is_admin)"
+        " VALUES ('existant', 'hash', 'Existant', 1);"
+        "CREATE TABLE activities (user_id INTEGER NOT NULL, id TEXT NOT NULL, source TEXT NOT NULL,"
+        " sport TEXT NOT NULL, start_time TEXT NOT NULL, duration_s REAL NOT NULL, PRIMARY KEY (user_id, id));"
+    )
+    old.close()
+
+    conn = connect(db_path)
+    assert tuple(conn.execute("SELECT username, is_admin FROM users").fetchone()) == ("existant", 1)
+    assert conn.execute("SELECT COUNT(*) FROM _yoyo_migration").fetchone()[0] == 7
+    assert "api_key" in {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    assert {row[1] for row in conn.execute("PRAGMA table_info(activities)")} >= {
+        "sub_sport", "hidden", "efforts_version"
+    }
+    conn.close()
 
 
 def test_garmin_errors_include_library_warnings():

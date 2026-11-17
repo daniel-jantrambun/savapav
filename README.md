@@ -57,7 +57,9 @@ téléphone, en clair/sombre selon le réglage de l'appareil :
 - **Profil** : FC repos/max, connexion du compte Garmin (MFA compris), mot de passe.
 - **Comptes** (admins) : liste des comptes et de leur état Garmin, création, suppression, nouveau mot de passe.
 
-L'API est sous `/api` (docs : `/api/docs`).
+L'API est sous `/api` (docs : `/api/docs`). Hors navigateur, elle s'utilise avec l'API key générée dans
+**Profil**, qui donne les mêmes droits que le compte : `curl -H "Authorization: Bearer <api_key>" https://…/api/me`.
+Générer une nouvelle clé révoque l'ancienne.
 
 ## Comptes et Garmin
 
@@ -82,6 +84,14 @@ L'API est sous `/api` (docs : `/api/docs`).
 - Les données de chacun (activités, plans, FC repos/max) sont isolées par utilisateur.
 
 ## Développement local
+
+### Migrations de base de données
+
+Le schéma est géré par **yoyo-migrations** dans `src/coach/migrations/`. Les migrations non appliquées sont
+exécutées automatiquement à la première ouverture de la base par le processus. Pour faire évoluer le schéma,
+créez une nouvelle migration (par exemple `.venv/bin/yoyo new --sql -m "add api key" src/coach/migrations`) ;
+ne modifiez pas les migrations déjà appliquées. Les anciennes bases créées avant yoyo sont reconnues et leur
+historique actuel est enregistré sans rejouer leurs changements.
 
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -e '.[dev]'

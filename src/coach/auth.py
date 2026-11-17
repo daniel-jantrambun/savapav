@@ -150,6 +150,13 @@ def user_for_id(conn, user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def user_for_api_key(conn, api_key: str) -> dict | None:
+    if not api_key:
+        return None
+    row = conn.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
+    return dict(row) if row else None
+
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
