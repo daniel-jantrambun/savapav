@@ -309,10 +309,11 @@ def create_app(settings: Settings) -> FastAPI:
     # --- Activités et charge ---------------------------------------------------------------------------------
 
     @api.get("/activities")
-    def list_activities(user: User, conn: Conn, limit: int = 50, category: str | None = None,
+    def list_activities(u: User, conn: Conn, limit: int = 50, category: str | None = None,
                         offset: int = Query(default=0, ge=0), hidden: bool = False):
         # hidden : inclure les activités masquées.
-        return service.activities_with_category(conn, user["id"], category, limit, offset, hidden)
+        logger.info("Utilisateur %s (%s) a accédé à /activities", u["username"], u["id"])
+        return service.activities_with_category(conn, u["id"], category, limit, offset, hidden)
 
     @api.get("/activities/category")
     def list_activities_by_category(user: User, conn: Conn, limit: int = 50, category: str | None = None,
